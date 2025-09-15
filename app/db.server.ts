@@ -1,15 +1,34 @@
 import { PrismaClient } from "@prisma/client";
 
 declare global {
-  var prismaGlobal: PrismaClient;
+  var prismaGlobal: PrismaClient | undefined;
 }
 
-if (process.env.NODE_ENV !== "production") {
+// Create Prisma client with connection pool settings
+function createPrismaClient() {
+  return new PrismaClient({
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+    datasourceUrl: process.env.DATABASE_URL
+  });
+}
+
+// Use global variable in development to prevent too many connections
+let prisma: PrismaClient;
+
+if (process.env.NODE_ENV === "production") {
+  prisma = createPrismaClient();
+} else {
   if (!global.prismaGlobal) {
-    global.prismaGlobal = new PrismaClient();
+    global.prismaGlobal = createPrismaClient();
   }
+  prisma = global.prismaGlobal;
 }
 
-const prisma = global.prismaGlobal ?? new PrismaClient();
+// Connect explicitly on startup
+if (process.env.NODE_ENV === "development") {
+  prisma.$connect().catch((error) => {
+    console.error("Failed to connect to database:", error);
+  });
+}
 
 export default prisma;

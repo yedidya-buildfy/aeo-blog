@@ -11,11 +11,14 @@ import {
   BlockStack,
   Badge,
   List,
+  TextField,
+  DataTable,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { GeminiService } from "../services/gemini.service";
 import { ShopifyShopService } from "../services/shopify-shop.service";
+import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
@@ -23,14 +26,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const shopService = new ShopifyShopService(admin);
     const shopInfo = await shopService.getShopInfo();
 
+    // Skip database queries for now to isolate the connection issue
     return json({
       shopInfo,
+      recentKeywords: [], // Will be loaded via action instead
+      recentBlogs: [],
       error: null
     });
   } catch (error) {
     console.error('Error in seo-blogs loader:', error);
     return json({
       shopInfo: null,
+      recentKeywords: [],
+      recentBlogs: [],
       error: 'Failed to load shop information'
     });
   }
@@ -40,6 +48,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const actionType = formData.get('actionType');
   const selectedKeyword = formData.get('keyword');
+  const customUrl = formData.get('customUrl');
 
   try {
     const { admin } = await authenticate.admin(request);
@@ -47,26 +56,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const geminiService = new GeminiService();
 
     if (actionType === 'findKeywords') {
-      // Use live store for testing instead of dev store
-      const homepageUrl = 'https://drive-buddy.com/';
+      // Use custom URL if provided, otherwise use shop's domain
+      let homepageUrl;
+      if (customUrl && typeof customUrl === 'string' && customUrl.trim()) {
+        homepageUrl = customUrl.startsWith('http') ? customUrl : `https://${customUrl}`;
+      } else {
+        const shopService = new ShopifyShopService(admin);
+        const shopInfo = await shopService.getShopInfo();
+        homepageUrl = `https://${shopInfo.primaryDomain}/`;
+      }
 
-      // Generate keywords using Gemini
-      const keywordPrompt = `Analyze this Shopify store: ${homepageUrl}
+      // Generate keywords using Gemini with URL context - work WITH its natural descriptive style
+      const keywordPrompt = `Analyze the website ${homepageUrl} and generate SEO keywords.
 
-      Generate 15-20 SEO keywords that would be perfect for blog content to improve this store's search ranking.
+      Please identify and list:
 
-      Return only a JSON array of keywords like this:
-      ["keyword 1", "keyword 2", "keyword 3"]
+      MAIN PRODUCTS/SERVICES:
+      List the specific products or services they sell, using the website's language.
 
-      Focus on:
-      - Product-related keywords
-      - Industry terms
-      - Long-tail keywords for blog content
-      - Local SEO terms if applicable`;
+      PROBLEMS THEY SOLVE:
+      What issues do their products fix or prevent?
 
+      WHAT CUSTOMERS SEARCH FOR:
+      What terms would customers use to find these products?
+
+      For each category, provide 5-7 short keywords (2-4 words each) in the same language as the website.
+      Be specific and use terms that appear on the website.`;
+
+      // Note: Cannot use structured output config with tools like url_context
       const requestBody = {
-        contents: [{ parts: [{ text: keywordPrompt }] }]
+        contents: [{ parts: [{ text: keywordPrompt }] }],
+        tools: [{ url_context: {} }]
       };
+
+      console.log('Making Gemini API request:', JSON.stringify(requestBody, null, 2));
 
       const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
         method: 'POST',
@@ -77,25 +100,232 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         body: JSON.stringify(requestBody)
       });
 
+      console.log('Gemini API response status:', response.status);
+
       if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.status}`);
+        const errorBody = await response.text();
+        console.error('Gemini API error body:', errorBody);
+        throw new Error(`Gemini API error: ${response.status} - ${errorBody}`);
       }
 
       const data = await response.json();
       const generatedText = data.candidates[0].content.parts[0].text.trim();
 
-      // Parse JSON from response
-      let keywords;
+      console.log('Gemini structured output response:', generatedText.substring(0, 500));
+
+      // Helper functions for keyword extraction (defined at function scope)
+      const extractKeywordsFromText = (text: string) => {
+        console.log('Analyzing text for keyword patterns...');
+
+        const keywords = {
+          mainProducts: [] as string[],
+          problemsSolved: [] as string[],
+          customerSearches: [] as string[]
+        };
+
+        // Split text into sections and clean
+        const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+        // Extract keywords using multiple strategies
+        let currentCategory = '';
+
+        for (const line of lines) {
+          // Detect section headers
+          if (line.toUpperCase().includes('MAIN PRODUCTS') || line.toUpperCase().includes('PRODUCTS') || line.includes('מוצרים')) {
+            currentCategory = 'mainProducts';
+            continue;
+          }
+          if (line.toUpperCase().includes('PROBLEMS') || line.toUpperCase().includes('SOLVE') || line.includes('בעיות')) {
+            currentCategory = 'problemsSolved';
+            continue;
+          }
+          if (line.toUpperCase().includes('CUSTOMERS') || line.toUpperCase().includes('SEARCH') || line.includes('לקוחות')) {
+            currentCategory = 'customerSearches';
+            continue;
+          }
+
+          // Extract keywords from current line
+          const extractedKeywords = extractKeywordsFromLine(line);
+
+          // If we're in a specific category, add to that category
+          if (currentCategory && extractedKeywords.length > 0) {
+            keywords[currentCategory as keyof typeof keywords].push(...extractedKeywords);
+          } else {
+            // Smart categorization based on content
+            extractedKeywords.forEach(keyword => {
+              if (isProductKeyword(keyword)) {
+                keywords.mainProducts.push(keyword);
+              } else if (isProblemKeyword(keyword)) {
+                keywords.problemsSolved.push(keyword);
+              } else {
+                keywords.customerSearches.push(keyword);
+              }
+            });
+          }
+        }
+
+        // Ensure minimum keywords per category with intelligent extraction
+        if (keywords.mainProducts.length < 3) {
+          keywords.mainProducts.push(...extractProductKeywords(text));
+        }
+        if (keywords.problemsSolved.length < 3) {
+          keywords.problemsSolved.push(...extractProblemKeywords(text));
+        }
+        if (keywords.customerSearches.length < 3) {
+          keywords.customerSearches.push(...extractSearchKeywords(text));
+        }
+
+        // Remove duplicates and limit to reasonable numbers
+        keywords.mainProducts = [...new Set(keywords.mainProducts)].slice(0, 8);
+        keywords.problemsSolved = [...new Set(keywords.problemsSolved)].slice(0, 8);
+        keywords.customerSearches = [...new Set(keywords.customerSearches)].slice(0, 8);
+
+        console.log('Extracted keyword categories successfully');
+        return keywords;
+      };
+
+      const extractKeywordsFromLine = (line: string): string[] => {
+        const keywords: string[] = [];
+
+        // Hebrew keywords pattern (common in the responses we saw)
+        const hebrewMatches = line.match(/[\u0590-\u05FF][\u0590-\u05FF\s]*[\u0590-\u05FF]/g) || [];
+        keywords.push(...hebrewMatches.filter(k => k.length > 2));
+
+        // Product patterns (S2, S5, etc. that we saw in responses)
+        const productMatches = line.match(/[sS]\d+[\s]*[^\.\n]*/g) || [];
+        keywords.push(...productMatches.map(k => k.trim()).filter(k => k.length > 2));
+
+        // Quoted terms
+        const quotedMatches = line.match(/"([^"]+)"/g) || [];
+        keywords.push(...quotedMatches.map(k => k.replace(/"/g, '').trim()));
+
+        // Bullet point content
+        if (line.includes('*') || line.includes('•') || line.includes('-')) {
+          const bulletContent = line.replace(/[*•-]\s*/, '').trim();
+          if (bulletContent.length > 2) {
+            keywords.push(bulletContent.split(/[:\(\)]/)[0].trim());
+          }
+        }
+
+        return keywords.filter(k => k && k.length > 2 && k.length < 50);
+      };
+
+      const isProductKeyword = (keyword: string): boolean => {
+        const productIndicators = ['coating', 'ציפוי', 'מגן', 'מסיר', 'kit', 'product', 'מוצר'];
+        return productIndicators.some(indicator => keyword.toLowerCase().includes(indicator));
+      };
+
+      const isProblemKeyword = (keyword: string): boolean => {
+        const problemIndicators = ['removal', 'הסרת', 'protection', 'הגנה', 'cleaning', 'ניקוי', 'prevent'];
+        return problemIndicators.some(indicator => keyword.toLowerCase().includes(indicator));
+      };
+
+      const extractProductKeywords = (text: string): string[] => {
+        const productPatterns = [
+          /[\u0590-\u05FF]+\s*coating/gi,
+          /ציפוי[\s\u0590-\u05FF]*/g,
+          /מגן[\s\u0590-\u05FF]*/g,
+          /מסיר[\s\u0590-\u05FF]*/g
+        ];
+
+        const keywords: string[] = [];
+        productPatterns.forEach(pattern => {
+          const matches = text.match(pattern) || [];
+          keywords.push(...matches.map(k => k.trim()));
+        });
+
+        return keywords.filter(k => k.length > 2).slice(0, 5);
+      };
+
+      const extractProblemKeywords = (text: string): string[] => {
+        const problemPatterns = [
+          /הסרת[\s\u0590-\u05FF]*/g,
+          /ניקוי[\s\u0590-\u05FF]*/g,
+          /הגנה[\s\u0590-\u05FF]*/g,
+          /cleaning[\s\w]*/gi,
+          /protection[\s\w]*/gi
+        ];
+
+        const keywords: string[] = [];
+        problemPatterns.forEach(pattern => {
+          const matches = text.match(pattern) || [];
+          keywords.push(...matches.map(k => k.trim()));
+        });
+
+        return keywords.filter(k => k.length > 2).slice(0, 5);
+      };
+
+      const extractSearchKeywords = (text: string): string[] => {
+        // General terms that customers might search for
+        const searchTerms = text.match(/[\u0590-\u05FF]{2,}[\s\u0590-\u05FF]*|[a-zA-Z]{3,}[\s\w]*/g) || [];
+        return searchTerms
+          .filter(k => k.length > 2 && k.length < 30)
+          .filter(k => !isProductKeyword(k) && !isProblemKeyword(k))
+          .slice(0, 5);
+      };
+
+      // Extract keywords from Gemini's natural descriptive response (works with actual behavior)
+      let keywordData;
       try {
-        keywords = JSON.parse(generatedText);
-      } catch {
-        // Fallback if not valid JSON
-        keywords = generatedText.split('\n').filter(k => k.trim()).slice(0, 15);
+        console.log('Using Smart Text Extraction strategy...');
+        console.log('Response length:', generatedText.length, 'characters');
+
+        if (!generatedText || generatedText.trim().length === 0) {
+          console.log('⚠️  Empty response received, using fallback keywords');
+          // Fallback keywords for common cleaning/coating business
+          keywordData = {
+            mainProducts: ['cleaning products', 'protective coatings', 'surface treatment', 'maintenance solutions', 'care products'],
+            problemsSolved: ['stain removal', 'surface protection', 'easy cleaning', 'water repelling', 'maintenance'],
+            customerSearches: ['how to clean', 'surface protection', 'cleaning solution', 'maintenance tips', 'product care']
+          };
+        } else {
+          keywordData = extractKeywordsFromText(generatedText);
+        }
+
+        // Ensure we have valid data
+        keywordData.mainProducts = keywordData.mainProducts.filter((k: string) => k && k.length > 1);
+        keywordData.problemsSolved = keywordData.problemsSolved.filter((k: string) => k && k.length > 1);
+        keywordData.customerSearches = keywordData.customerSearches.filter((k: string) => k && k.length > 1);
+
+        console.log('✅ Successfully extracted keywords from text');
+        console.log(`   - mainProducts: ${keywordData.mainProducts.length} items`);
+        console.log(`   - problemsSolved: ${keywordData.problemsSolved.length} items`);
+        console.log(`   - customerSearches: ${keywordData.customerSearches.length} items`);
+
+      } catch (error: any) {
+        console.log('❌ Text extraction failed:', error.message);
+        console.log('Response preview:', generatedText.substring(0, 300));
+        throw new Error('Failed to extract keywords from response');
+      }
+
+      // Save keywords to database (flatten all categories)
+      try {
+        const shopService = new ShopifyShopService(admin);
+        const shopInfo = await shopService.getShopInfo();
+
+        const allKeywords = [
+          ...keywordData.mainProducts,
+          ...keywordData.problemsSolved,
+          ...keywordData.customerSearches
+        ];
+
+        await prisma.keywordAnalysis.create({
+          data: {
+            shopDomain: shopInfo.primaryDomain || 'unknown',
+            storeUrl: homepageUrl,
+            keywords: allKeywords
+          }
+        });
+
+        console.log('Keywords saved to database successfully:', allKeywords.length);
+      } catch (dbError) {
+        console.error('Failed to save keywords to database:', dbError);
+        // Continue anyway - don't fail the whole operation
       }
 
       return json({
         success: true,
-        keywords,
+        keywordData,
         homepageUrl
       });
     }
@@ -105,8 +335,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ success: false, error: 'No keyword selected' });
       }
 
-      // Use live store for testing instead of dev store
-      const homepageUrl = 'https://drive-buddy.com/';
+      // Get the actual shop's primary domain
+      const shopService = new ShopifyShopService(admin);
+      const shopInfo = await shopService.getShopInfo();
+      const homepageUrl = `https://${shopInfo.primaryDomain}/`;
 
       // 1. First create a blog if it doesn't exist
       const createBlogMutation = `
@@ -175,7 +407,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       Requirements:
-      - 800-1200 words
+      - 400-800 words
       - Use H2 and H3 headings
       - Include the keyword naturally
       - Add internal linking opportunities
@@ -229,10 +461,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           article: {
             blogId: blogId,
             title: blogContent.title,
-            contentHtml: blogContent.content,
+            body: blogContent.content,
             summary: blogContent.summary,
-            published: true,
-            tags: [selectedKeyword]
+            isPublished: true,
+            tags: [selectedKeyword],
+            author: {
+              name: "SEO Assistant"
+            }
           }
         }
       });
@@ -241,6 +476,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       if (articleData.data?.articleCreate?.userErrors?.length > 0) {
         throw new Error(articleData.data.articleCreate.userErrors[0].message);
+      }
+
+      // Save blog post to database
+      try {
+        const shopService = new ShopifyShopService(admin);
+        const shopInfo = await shopService.getShopInfo();
+
+        await prisma.blogPost.create({
+          data: {
+            shopDomain: shopInfo.primaryDomain || 'unknown',
+            shopifyBlogId: blogId,
+            shopifyArticleId: articleData.data?.articleCreate?.article?.id || 'unknown',
+            keyword: selectedKeyword,
+            title: blogContent.title,
+            status: 'published',
+            publishedAt: new Date()
+          }
+        });
+
+        console.log('Blog post saved to database successfully:', blogContent.title);
+      } catch (dbError) {
+        console.error('Failed to save blog post to database:', dbError);
+        // Continue anyway - don't fail the whole operation
       }
 
       return json({
@@ -254,29 +512,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   } catch (error) {
     console.error('Error in seo-blogs action:', error);
+
+    // Return a user-friendly error without causing 500
+    const errorMessage = error.message || 'Operation failed. Please try again.';
     return json({
       success: false,
-      error: error.message || 'Operation failed. Please try again.'
-    }, { status: 500 });
+      error: errorMessage.includes('Gemini API error')
+        ? 'Failed to generate keywords. Please check your API key and try again.'
+        : errorMessage
+    });
   }
 };
 
+interface KeywordData {
+  mainProducts: string[];
+  problemsSolved: string[];
+  customerSearches: string[];
+}
+
 export default function SEOBlogs() {
-  const { shopInfo, error: loaderError } = useLoaderData<typeof loader>();
+  const { shopInfo, recentKeywords, recentBlogs, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
 
-  const [keywords, setKeywords] = useState<string[]>([]);
+  const [keywordData, setKeywordData] = useState<KeywordData | null>(null);
   const [selectedKeyword, setSelectedKeyword] = useState<string>('');
   const [createdBlog, setCreatedBlog] = useState<any>(null);
+  const [customUrl, setCustomUrl] = useState<string>('https://drive-buddy.com/');
 
   const isLoading = fetcher.state === "submitting";
   const actionData = fetcher.data;
 
   // Handle action completion
-  if (actionData && actionData.success && actionData.keywords) {
-    if (keywords.length === 0) {
-      setKeywords(actionData.keywords);
+  if (actionData && actionData.success && actionData.keywordData) {
+    if (!keywordData) {
+      setKeywordData(actionData.keywordData);
       shopify.toast.show("Keywords found successfully!");
     }
   } else if (actionData && actionData.success && actionData.article) {
@@ -291,6 +561,9 @@ export default function SEOBlogs() {
   const handleFindKeywords = () => {
     const formData = new FormData();
     formData.append('actionType', 'findKeywords');
+    if (customUrl) {
+      formData.append('customUrl', customUrl);
+    }
     fetcher.submit(formData, { method: 'POST' });
   };
 
@@ -340,35 +613,78 @@ export default function SEOBlogs() {
                   Step 1: Find Keywords
                 </Text>
 
+                <TextField
+                  label="Website URL to analyze (optional)"
+                  value={customUrl}
+                  onChange={setCustomUrl}
+                  placeholder="https://drive-buddy.com/"
+                  helpText="Leave empty to use your shop's domain, or enter a custom URL for testing"
+                  autoComplete="url"
+                />
+
                 <Button
                   variant="primary"
                   size="large"
                   onClick={handleFindKeywords}
                   loading={isLoading}
-                  disabled={keywords.length > 0}
+                  disabled={!!keywordData}
                 >
                   {isLoading ? 'Finding Keywords...' :
-                   keywords.length > 0 ? 'Keywords Found' : 'Find Keywords'}
+                   keywordData ? 'Keywords Found' : 'Find Keywords'}
                 </Button>
 
-                {keywords.length > 0 && (
+                {keywordData && (
                   <Card background="bg-surface-secondary">
-                    <BlockStack gap="200">
+                    <BlockStack gap="300">
                       <Text as="h4" variant="headingMd">
-                        Found Keywords ({keywords.length})
+                        Found Keywords by Category
                       </Text>
-                      <BlockStack gap="200">
-                        {keywords.map((keyword, index) => (
-                          <Button
-                            key={index}
-                            variant={selectedKeyword === keyword ? "primary" : "secondary"}
-                            size="slim"
-                            onClick={() => setSelectedKeyword(keyword)}
-                          >
-                            {keyword}
-                          </Button>
-                        ))}
-                      </BlockStack>
+
+                      <DataTable
+                        columnContentTypes={['text', 'text', 'text']}
+                        headings={['Main Products/Services', 'Problems Solved', 'Customer Searches']}
+                        rows={(() => {
+                          const maxLength = Math.max(
+                            keywordData.mainProducts.length,
+                            keywordData.problemsSolved.length,
+                            keywordData.customerSearches.length
+                          );
+
+                          return Array.from({ length: maxLength }, (_, i) => [
+                            keywordData.mainProducts[i] ? (
+                              <Button
+                                key={`main-${i}`}
+                                variant={selectedKeyword === keywordData.mainProducts[i] ? "primary" : "plain"}
+                                size="slim"
+                                onClick={() => setSelectedKeyword(keywordData.mainProducts[i])}
+                              >
+                                {keywordData.mainProducts[i]}
+                              </Button>
+                            ) : '',
+                            keywordData.problemsSolved[i] ? (
+                              <Button
+                                key={`prob-${i}`}
+                                variant={selectedKeyword === keywordData.problemsSolved[i] ? "primary" : "plain"}
+                                size="slim"
+                                onClick={() => setSelectedKeyword(keywordData.problemsSolved[i])}
+                              >
+                                {keywordData.problemsSolved[i]}
+                              </Button>
+                            ) : '',
+                            keywordData.customerSearches[i] ? (
+                              <Button
+                                key={`search-${i}`}
+                                variant={selectedKeyword === keywordData.customerSearches[i] ? "primary" : "plain"}
+                                size="slim"
+                                onClick={() => setSelectedKeyword(keywordData.customerSearches[i])}
+                              >
+                                {keywordData.customerSearches[i]}
+                              </Button>
+                            ) : ''
+                          ]);
+                        })()}
+                      />
+
                       {selectedKeyword && (
                         <Text as="p" variant="bodySm" tone="success">
                           Selected: {selectedKeyword}

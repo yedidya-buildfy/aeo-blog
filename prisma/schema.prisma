@@ -51,3 +51,30 @@ model AEOOperation {
 
   @@index([shopDomain])
 }
+
+model KeywordAnalysis {
+  id          String   @id @default(cuid())
+  shopDomain  String
+  storeUrl    String   // URL analyzed (e.g., https://drive-buddy.com/)
+  keywords    String[] // Array of keywords found
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([shopDomain])
+  @@index([storeUrl])
+}
+
+model BlogPost {
+  id          String   @id @default(cuid())
+  shopDomain  String
+  shopifyBlogId String // Shopify blog ID (gid://...)
+  shopifyArticleId String // Shopify article ID (gid://...)
+  keyword     String   // Keyword used for this blog
+  title       String   // Blog post title
+  status      String   // 'created', 'published', 'failed'
+  createdAt   DateTime @default(now())
+  publishedAt DateTime?
+
+  @@index([shopDomain])
+  @@index([keyword])
+}
