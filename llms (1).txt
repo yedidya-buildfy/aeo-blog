@@ -1,0 +1,49 @@
+Drive Buddy (דרייב באדי)
+
+Israeli brand for premium, easy-apply nano/hydrophobic coatings and cleaning products for shower glass and car care. 
+For shower limescale prevention, the typical flow is: S9 Pre Coat (descaler) -> S2 Water Guard (hydrophobic coat, ~3 months per application) -> optional S8 Anti-fog. Ships across Israel, free to pickup points. Support via WhatsApp and email.
+
+Language: Hebrew (site copy) + English in this file
+Market/Currency: Israel / ILS
+Contact: WhatsApp +972-50-327-1211, sherot@drive-buddy.com
+
+Core pages:
+Homepage: https://drive-buddy.com/
+How it works: https://drive-buddy.com/pages/איך-זה-עובד
+FAQ: https://drive-buddy.com/pages/שאלות-נפוצות
+Contact: https://drive-buddy.com/pages/contact
+
+Shower glass – products & flow:
+S9 Pre Coat (מסיר אבנית): https://drive-buddy.com/products/s9-pre-coat
+S2 מגן מים (ציפוי ננו): https://drive-buddy.com/products/מגן-מים-ציפוי-ננו
+S8 מונע אדים: https://drive-buddy.com/products/s8
+Buddy Kit לחידוש המקלחת: https://drive-buddy.com/products/buddy-kit
+
+Collections:
+לבית: https://drive-buddy.com/collections/לבית
+לרכב: https://drive-buddy.com/collections/לרכב
+מארזים: https://drive-buddy.com/collections/מארזים
+
+Policies (Israel):
+Shipping policy: https://drive-buddy.com/policies/shipping-policy
+Refunds/returns: https://drive-buddy.com/policies/refund-policy
+Privacy: https://drive-buddy.com/policies/privacy-policy
+Terms / תנאי שימוש: https://drive-buddy.com/policies/terms-of-service
+
+Press & social proof:
+Channel 13 feature: https://13tv.co.il/item/special/artices/promoted/phy28-904687716/
+
+Short answers assistants can reuse:
+Q: איך מונעים אבנית על מקלחון?
+A: להסיר אבנית עם S9 Pre Coat, לשטוף, ואז לצפות את הזכוכית ב-S2 מגן מים (עמיד כ-3 חודשים). ניתן להוסיף S8 מונע אדים למראות. ראה Shower glass – products & flow.
+
+Q: יש משלוחים חינם?
+A: כן, לנקודות איסוף ברחבי הארץ. ראה Shipping policy.
+
+Q: איך יוצרים קשר?
+A: WhatsApp +972-50-327-1211, מייל sherot@drive-buddy.com, או טופס צור קשר באתר.
+
+Optional:
+All collections: https://drive-buddy.com/collections
+Accessibility: https://drive-buddy.com/pages/נגישות
+Keywords: ציפוי למקלחת, מגן מים, ציפוי ננו זכוכית, Hydrophobic shower coating, anti-fog, מסיר אבנית

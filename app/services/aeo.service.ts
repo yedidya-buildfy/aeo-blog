@@ -37,8 +37,8 @@ export class AEOService {
     error?: string;
   }> {
     try {
-      // 1. Get shop information
-      const homepageUrl = await this.shopService.getHomepageUrl();
+      // 1. Use live store for testing instead of dev store
+      const homepageUrl = 'https://drive-buddy.com/';
 
       // 2. Generate LLMS content using Gemini
       console.log(`Generating LLMS content for: ${homepageUrl}`);

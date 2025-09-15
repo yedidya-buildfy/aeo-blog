@@ -271,14 +271,10 @@ export default function AEODashboard() {
                     onClick={handlePreviewAEO}
                     loading={isLoading && fetcher.formData?.get('actionType') === 'preview'}
                   >
-                    {isLoading && fetcher.formData?.get('actionType') === 'preview' ? (
-                      <InlineStack gap="200" align="center">
-                        <Spinner size="small" />
-                        <Text as="span">Generating Preview...</Text>
-                      </InlineStack>
-                    ) : (
-                      'Generate AEO Preview'
-                    )}
+                    {isLoading && fetcher.formData?.get('actionType') === 'preview' 
+                      ? 'Generating Preview...' 
+                      : 'Generate AEO Preview'
+                    }
                   </Button>
                   
                   {status?.backups && status.backups.length > 0 && (
@@ -286,14 +282,10 @@ export default function AEODashboard() {
                       onClick={handleRestoreBackup}
                       loading={isLoading && fetcher.formData?.get('actionType') === 'restore'}
                     >
-                      {isLoading && fetcher.formData?.get('actionType') === 'restore' ? (
-                        <InlineStack gap="200" align="center">
-                          <Spinner size="small" />
-                          <Text as="span">Restoring...</Text>
-                        </InlineStack>
-                      ) : (
-                        'Restore Backup'
-                      )}
+                      {isLoading && fetcher.formData?.get('actionType') === 'restore'
+                        ? 'Restoring...'
+                        : 'Restore Backup'
+                      }
                     </Button>
                   )}
                 </InlineStack>

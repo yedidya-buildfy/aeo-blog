@@ -24,6 +24,9 @@ export default function App() {
         <Link to="/app" rel="home">
           Home
         </Link>
+        <Link to="/app/seo-blogs">
+          Improve My SEO
+        </Link>
       </NavMenu>
       <Outlet />
     </AppProvider>
