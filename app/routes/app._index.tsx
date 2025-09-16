@@ -56,7 +56,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         homepageUrl: '',
         currentRobots: null,
         currentLlms: null,
-        lastOperation: null,
+        lastAEOContent: null,
         backups: [],
       }, 
       error: null 
@@ -84,38 +84,75 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       backupService
     );
 
-    if (actionType === 'preview') {
-      console.log("Starting AEO preview generation...");
-      const result = await aeoService.previewAEO();
-      
-      if (result.success) {
-        console.log("AEO preview generated successfully");
-      } else {
-        console.log("AEO preview failed:", result.error);
+    if (actionType === 'improve') {
+      console.log("Starting improved AEO process...");
+
+      // 1. First generate the content like preview
+      const previewResult = await aeoService.previewAEO();
+      if (!previewResult.success) {
+        return json({ success: false, error: previewResult.error });
       }
-      
-      return json(result);
-    } else if (actionType === 'improve') {
-      console.log("Starting AEO improvement...");
-      const result = await aeoService.improveAEO();
-      
-      if (result.success) {
-        console.log("AEO improvement completed successfully");
-      } else {
-        console.log("AEO improvement failed:", result.error);
+
+      // 2. Check existing files and create if missing
+      const existingRobots = await themeService.getRobotsFile();
+      const existingLlms = await themeService.getLlmsFile();
+
+      const filesToCreate = [];
+      if (!existingRobots) {
+        filesToCreate.push({
+          filename: 'robots.txt.liquid',
+          content: previewResult.generatedRobots
+        });
       }
-      
-      return json(result);
+      if (!existingLlms) {
+        filesToCreate.push({
+          filename: 'llms.txt.liquid',
+          content: previewResult.generatedLlms
+        });
+      }
+
+      // 3. Create missing files first
+      if (filesToCreate.length > 0) {
+        const createResult = await themeService.createMultipleTemplateFiles(filesToCreate);
+        if (!createResult) {
+          return json({ success: false, error: 'Failed to create missing files' });
+        }
+      }
+
+      // 4. Now update both files with generated content
+      console.log('Updating robots.txt.liquid with generated content...');
+      const robotsUpdated = await themeService.updateRobotsFile(previewResult.generatedRobots);
+      if (!robotsUpdated) {
+        return json({ success: false, error: 'Failed to update robots.txt.liquid' });
+      }
+
+      console.log('Updating llms.txt.liquid with generated content...');
+      const llmsUpdated = await themeService.updateLlmsFile(previewResult.generatedLlms);
+      if (!llmsUpdated) {
+        return json({ success: false, error: 'Failed to update llms.txt.liquid' });
+      }
+
+      console.log("AEO improvement completed successfully!");
+
+      return json({
+        success: true,
+        message: 'AEO files created and updated successfully',
+        generatedRobots: previewResult.generatedRobots,
+        generatedLlms: previewResult.generatedLlms,
+        homepageUrl: previewResult.homepageUrl,
+        robotsUpdated,
+        llmsUpdated
+      });
     } else if (actionType === 'restore') {
       console.log("Starting backup restore...");
       const result = await aeoService.restoreBackup();
-      
+
       if (result.success) {
         console.log("Backup restore completed successfully");
       } else {
         console.log("Backup restore failed:", result.error);
       }
-      
+
       return json(result);
     } else {
       return json({ success: false, error: 'Invalid action type' }, { status: 400 });
@@ -159,35 +196,31 @@ export default function AEODashboard() {
         const actionType = fetcher.formData?.get('actionType');
         let message = "Operation completed successfully!";
         
-        if (actionType === 'preview') {
-          message = "AEO files generated successfully! Check the preview below.";
-        } else if (actionType === 'improve') {
-          message = "AEO improvement completed successfully!";
+        if (actionType === 'improve') {
+          message = actionData.message || "AEO improvement completed successfully!";
         } else if (actionType === 'restore') {
           message = "Backup restored successfully!";
         }
         
         shopify.toast.show(message);
         
-        // For preview, don't refresh the page so user can see the results
-        if (actionType !== 'preview') {
-          revalidator.revalidate();
-        }
+        // Refresh to show updated file status in sidebar
+        revalidator.revalidate();
       } else {
         shopify.toast.show(`Error: ${actionData.error}`, { isError: true });
       }
     }
   }, [actionData, shopify, revalidator, fetcher.formData]);
 
-  const handlePreviewAEO = () => {
-    const formData = new FormData();
-    formData.append('actionType', 'preview');
-    fetcher.submit(formData, { method: 'POST' });
-  };
-
   const handleRestoreBackup = () => {
     const formData = new FormData();
     formData.append('actionType', 'restore');
+    fetcher.submit(formData, { method: 'POST' });
+  };
+
+  const handleImproveAEO = () => {
+    const formData = new FormData();
+    formData.append('actionType', 'improve');
     fetcher.submit(formData, { method: 'POST' });
   };
 
@@ -259,8 +292,7 @@ export default function AEODashboard() {
                     AI Engine Optimization
                   </Text>
                   <Text as="p" variant="bodyMd" tone="subdued">
-                    Preview your store's optimized AEO files for AI search engines. 
-                    This will generate robots.txt and llms.txt content using Gemini AI for you to review.
+                    One-click AEO optimization for your store. This will generate robots.txt and llms.txt files using Gemini AI and automatically apply them to your theme.
                   </Text>
                 </BlockStack>
                 
@@ -268,15 +300,15 @@ export default function AEODashboard() {
                   <Button
                     variant="primary"
                     size="large"
-                    onClick={handlePreviewAEO}
-                    loading={isLoading && fetcher.formData?.get('actionType') === 'preview'}
+                    onClick={handleImproveAEO}
+                    loading={isLoading && fetcher.formData?.get('actionType') === 'improve'}
                   >
-                    {isLoading && fetcher.formData?.get('actionType') === 'preview' 
-                      ? 'Generating Preview...' 
-                      : 'Generate AEO Preview'
+                    {isLoading && fetcher.formData?.get('actionType') === 'improve'
+                      ? 'Improving AEO...'
+                      : 'Improve My AEO'
                     }
                   </Button>
-                  
+
                   {status?.backups && status.backups.length > 0 && (
                     <Button
                       onClick={handleRestoreBackup}
@@ -301,24 +333,22 @@ export default function AEODashboard() {
                   <Text as="h3" variant="headingMd">
                     Status
                   </Text>
-                  {status?.lastOperation ? (
+                  {status?.lastAEOContent ? (
                     <BlockStack gap="200">
                       <InlineStack align="space-between">
-                        <Text as="span" variant="bodyMd">Last Operation</Text>
-                        {getStatusBadge(status.lastOperation.status)}
+                        <Text as="span" variant="bodyMd">Last AEO Generation</Text>
+                        {getStatusBadge(status.lastAEOContent.status)}
                       </InlineStack>
                       <Text as="p" variant="bodySm" tone="subdued">
-                        {formatDateTime(status.lastOperation.createdAt)}
+                        Version {status.lastAEOContent.version} - {formatDateTime(status.lastAEOContent.createdAt)}
                       </Text>
-                      {status.lastOperation.error && (
-                        <Banner status="critical" title="Last Error">
-                          <p>{status.lastOperation.error}</p>
-                        </Banner>
-                      )}
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Source: {status.lastAEOContent.sourceUrl}
+                      </Text>
                     </BlockStack>
                   ) : (
                     <Text as="p" variant="bodyMd" tone="subdued">
-                      No operations yet
+                      No AEO content generated yet
                     </Text>
                   )}
                 </BlockStack>
@@ -351,17 +381,17 @@ export default function AEODashboard() {
           </Layout.Section>
         </Layout>
         
-        {/* Preview Section */}
-        {actionData && actionData.success && actionData.generatedRobots && actionData.generatedLlms && (
+        {/* Applied Files Section */}
+        {actionData && actionData.success && actionData.generatedRobots && actionData.generatedLlms && fetcher.formData?.get('actionType') === 'improve' && (
           <Layout>
             <Layout.Section>
               <Card>
                 <BlockStack gap="400">
                   <Text as="h2" variant="headingLg">
-                    Generated AEO Files Preview
+                    Applied AEO Files
                   </Text>
                   <Text as="p" variant="bodyMd" tone="success">
-                    Files generated successfully for: {actionData.homepageUrl}
+                    Files successfully applied to your theme for: {actionData.homepageUrl}
                   </Text>
                   
                   <Divider />

@@ -1,4 +1,4 @@
-import { PrismaClient, Backup, AEOOperation } from '@prisma/client';
+import { PrismaClient, Backup, AEOContent } from '@prisma/client';
 
 export class BackupService {
   constructor(private prisma: PrismaClient) {}
@@ -36,36 +36,54 @@ export class BackupService {
     });
   }
 
-  async createOperation(shopDomain: string): Promise<AEOOperation> {
-    return await this.prisma.aEOOperation.create({
+  async createAEOContent(data: {
+    shopDomain: string;
+    sourceUrl: string;
+    llmsContent: string;
+    status: string;
+  }): Promise<AEOContent> {
+    // Get the next version number for this shop
+    const latestContent = await this.getLatestAEOContent(data.shopDomain);
+    const version = latestContent ? latestContent.version + 1 : 1;
+
+    return await this.prisma.aEOContent.create({
       data: {
-        shopDomain,
-        status: 'in_progress',
+        ...data,
+        version,
       },
     });
   }
 
-  async updateOperation(
-    operationId: string, 
-    status: 'success' | 'failed', 
-    error?: string
-  ): Promise<AEOOperation> {
-    return await this.prisma.aEOOperation.update({
-      where: { id: operationId },
-      data: {
-        status,
-        error: status === 'failed' ? error : null,
-      },
-    });
-  }
-
-  async getLastOperation(shopDomain: string): Promise<AEOOperation | null> {
-    return await this.prisma.aEOOperation.findFirst({
+  async getLatestAEOContent(shopDomain: string): Promise<AEOContent | null> {
+    return await this.prisma.aEOContent.findFirst({
       where: {
         shopDomain,
       },
       orderBy: {
         createdAt: 'desc',
+      },
+    });
+  }
+
+  async getAllAEOContent(shopDomain: string): Promise<AEOContent[]> {
+    return await this.prisma.aEOContent.findMany({
+      where: {
+        shopDomain,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  async updateAEOContentStatus(
+    id: string,
+    status: string
+  ): Promise<AEOContent> {
+    return await this.prisma.aEOContent.update({
+      where: { id },
+      data: {
+        status,
       },
     });
   }

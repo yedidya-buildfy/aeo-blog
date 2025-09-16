@@ -1,13 +1,7 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -32,63 +26,63 @@ model Session {
 }
 
 model Backup {
-  id          String   @id @default(cuid())
-  shopDomain  String
-  fileName    String   // 'robots.txt.liquid' or 'llms.txt.liquid'
-  content     String?  // backup content, can be null if file didn't exist
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  shopDomain String
+  fileName   String
+  content    String?
+  createdAt  DateTime @default(now())
 
   @@index([shopDomain, fileName])
 }
 
-model AEOOperation {
-  id          String   @id @default(cuid())
-  shopDomain  String
-  status      String   // 'in_progress', 'success', 'failed'
-  error       String?  // error message if failed
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([shopDomain])
-}
-
 model KeywordAnalysis {
-  id                String   @id @default(cuid())
-  shopDomain        String
-  storeUrl          String   // URL analyzed (e.g., https://drive-buddy.com/)
-  keywords          String[] // Array of keywords found (legacy field for backwards compatibility)
-  mainProducts      String[] @default([]) // Main products/services keywords
-  problemsSolved    String[] @default([]) // Problems solved keywords
-  customerSearches  String[] @default([]) // Customer search terms
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id               String   @id @default(cuid())
+  shopDomain       String
+  storeUrl         String
+  keywords         String[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  customerSearches String[] @default([])
+  mainProducts     String[] @default([])
+  problemsSolved   String[] @default([])
 
   @@index([shopDomain])
   @@index([storeUrl])
 }
 
 model BlogPost {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   shopDomain       String
-  shopifyBlogId    String // Shopify blog ID (gid://...)
-  shopifyArticleId String // Shopify article ID (gid://...)
-  keyword          String   // Primary keyword used for this blog
-  title            String   // Blog post title
-  handle           String   // Blog post URL handle
-  status           String   // 'created', 'published', 'failed'
-
-  // Uniqueness tracking fields
-  primaryTopic     String   // Main topic focus (e.g., "Ultimate Guide to Products")
-  keywordsFocused  String[] @default([]) // Keywords used in this blog
-  contentHash      String   // Hash for duplicate detection
-  contentAngle     String   // Content approach: 'how-to', 'benefits', 'problems', 'comparison', 'trend'
-
-  createdAt        DateTime @default(now())
+  shopifyBlogId    String
+  shopifyArticleId String
+  keyword          String
+  title            String
+  status           String
+  createdAt        DateTime  @default(now())
   publishedAt      DateTime?
+  contentAngle     String
+  contentHash      String
+  handle           String
+  keywordsFocused  String[]  @default([])
+  primaryTopic     String
 
+  @@unique([shopDomain, contentHash])
   @@index([shopDomain])
   @@index([keyword])
   @@index([primaryTopic])
   @@index([contentHash])
-  @@unique([shopDomain, contentHash])
+}
+
+model AEOContent {
+  id          String   @id @default(cuid())
+  shopDomain  String
+  sourceUrl   String
+  llmsContent String
+  version     Int      @default(1)
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([shopDomain])
+  @@index([sourceUrl])
 }

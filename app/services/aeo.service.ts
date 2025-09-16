@@ -3,11 +3,11 @@ import { ShopifyShopService } from './shopify-shop.service';
 import { GeminiService } from './gemini.service';
 import { BackupService } from './backup.service';
 import { UNIVERSAL_ROBOTS_TXT } from '../constants/aeo-templates';
-import { Backup } from '@prisma/client';
+import { Backup, AEOContent } from '@prisma/client';
 
 export interface AEOResult {
   success: boolean;
-  operationId?: string;
+  aeoContentId?: string;
   robotsUpdated?: boolean;
   llmsUpdated?: boolean;
   backups?: Backup[];
@@ -34,21 +34,46 @@ export class AEOService {
     generatedRobots: string;
     generatedLlms: string;
     homepageUrl: string;
+    aeoContentId?: string;
     error?: string;
   }> {
     try {
-      // 1. Use live store for testing instead of dev store
+      // 1. Get shop information
+      const shopDomain = await this.shopService.getShopDomain();
+      // Use hardcoded URL for testing like before
       const homepageUrl = 'https://drive-buddy.com/';
+
+      console.log(`Shop Domain: ${shopDomain}`);
+      console.log(`Homepage URL: ${homepageUrl}`);
 
       // 2. Generate LLMS content using Gemini
       console.log(`Generating LLMS content for: ${homepageUrl}`);
       const generatedLlmsContent = await this.geminiService.generateLlmsContent(homepageUrl);
+
+      console.log(`Generated LLMS content length: ${generatedLlmsContent.length}`);
+      console.log(`Generated LLMS content preview: ${generatedLlmsContent.substring(0, 200)}...`);
+
+      if (!generatedLlmsContent || generatedLlmsContent.trim().length === 0) {
+        throw new Error('Gemini API returned empty LLMS content');
+      }
+
+      // 3. Save generated content to database
+      console.log('Saving generated AEO content to database...');
+      const aeoContent = await this.backupService.createAEOContent({
+        shopDomain,
+        sourceUrl: homepageUrl,
+        llmsContent: generatedLlmsContent,
+        status: 'generated'
+      });
+
+      console.log(`AEO content saved to database with ID: ${aeoContent.id}`);
 
       return {
         success: true,
         generatedRobots: UNIVERSAL_ROBOTS_TXT,
         generatedLlms: generatedLlmsContent,
         homepageUrl,
+        aeoContentId: aeoContent.id,
       };
 
     } catch (error) {
@@ -65,22 +90,18 @@ export class AEOService {
   }
 
   async improveAEO(): Promise<AEOResult> {
-    let operationId: string | undefined;
+    let aeoContentId: string | undefined;
 
     try {
       // 1. Get shop information
       const shopDomain = await this.shopService.getShopDomain();
       const homepageUrl = await this.shopService.getHomepageUrl();
 
-      // 2. Create operation record
-      const operation = await this.backupService.createOperation(shopDomain);
-      operationId = operation.id;
-
-      // 3. Get existing theme files
+      // 2. Get existing theme files
       const existingRobots = await this.themeService.getRobotsFile();
       const existingLlms = await this.themeService.getLlmsFile();
 
-      // 4. Create backups
+      // 3. Create backups
       const robotsBackup = await this.backupService.createBackup(
         shopDomain,
         'robots.txt.liquid',
@@ -93,9 +114,19 @@ export class AEOService {
         existingLlms
       );
 
-      // 5. Generate LLMS content using Gemini
+      // 4. Generate LLMS content using Gemini
       console.log(`Generating LLMS content for: ${homepageUrl}`);
       const generatedLlmsContent = await this.geminiService.generateLlmsContent(homepageUrl);
+
+      // 5. Save generated content to database
+      console.log('Saving generated AEO content to database...');
+      const aeoContent = await this.backupService.createAEOContent({
+        shopDomain,
+        sourceUrl: homepageUrl,
+        llmsContent: generatedLlmsContent,
+        status: 'generated'
+      });
+      aeoContentId = aeoContent.id;
 
       // 6. Update theme files
       console.log('Updating robots.txt.liquid...');
@@ -110,14 +141,14 @@ export class AEOService {
         throw new Error('Failed to update llms.txt.liquid');
       }
 
-      // 7. Mark operation as successful
-      await this.backupService.updateOperation(operationId, 'success');
+      // 7. Update AEO content status to applied
+      await this.backupService.updateAEOContentStatus(aeoContentId, 'applied');
 
       console.log('AEO improvement completed successfully!');
 
       return {
         success: true,
-        operationId,
+        aeoContentId,
         robotsUpdated,
         llmsUpdated,
         backups: [robotsBackup, llmsBackup],
@@ -126,18 +157,14 @@ export class AEOService {
     } catch (error) {
       console.error('AEO improvement failed:', error);
 
-      // Mark operation as failed
-      if (operationId) {
-        await this.backupService.updateOperation(
-          operationId,
-          'failed',
-          error instanceof Error ? error.message : 'Unknown error'
-        );
+      // Mark AEO content as failed if it was created
+      if (aeoContentId) {
+        await this.backupService.updateAEOContentStatus(aeoContentId, 'failed');
       }
 
       return {
         success: false,
-        operationId,
+        aeoContentId,
         error: error instanceof Error ? error.message : 'Unknown error occurred',
       };
     }
@@ -196,14 +223,14 @@ export class AEOService {
     homepageUrl: string;
     currentRobots: string | null;
     currentLlms: string | null;
-    lastOperation: any;
+    lastAEOContent: AEOContent | null;
     backups: Backup[];
   }> {
     const shopDomain = await this.shopService.getShopDomain();
     const homepageUrl = await this.shopService.getHomepageUrl();
     const currentRobots = await this.themeService.getRobotsFile();
     const currentLlms = await this.themeService.getLlmsFile();
-    const lastOperation = await this.backupService.getLastOperation(shopDomain);
+    const lastAEOContent = await this.backupService.getLatestAEOContent(shopDomain);
     const backups = await this.backupService.getAllBackups(shopDomain);
 
     return {
@@ -211,7 +238,7 @@ export class AEOService {
       homepageUrl,
       currentRobots,
       currentLlms,
-      lastOperation,
+      lastAEOContent,
       backups,
     };
   }
