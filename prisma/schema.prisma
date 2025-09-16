@@ -53,28 +53,42 @@ model AEOOperation {
 }
 
 model KeywordAnalysis {
-  id          String   @id @default(cuid())
-  shopDomain  String
-  storeUrl    String   // URL analyzed (e.g., https://drive-buddy.com/)
-  keywords    String[] // Array of keywords found
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String   @id @default(cuid())
+  shopDomain        String
+  storeUrl          String   // URL analyzed (e.g., https://drive-buddy.com/)
+  keywords          String[] // Array of keywords found (legacy field for backwards compatibility)
+  mainProducts      String[] @default([]) // Main products/services keywords
+  problemsSolved    String[] @default([]) // Problems solved keywords
+  customerSearches  String[] @default([]) // Customer search terms
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([shopDomain])
   @@index([storeUrl])
 }
 
 model BlogPost {
-  id          String   @id @default(cuid())
-  shopDomain  String
-  shopifyBlogId String // Shopify blog ID (gid://...)
+  id               String   @id @default(cuid())
+  shopDomain       String
+  shopifyBlogId    String // Shopify blog ID (gid://...)
   shopifyArticleId String // Shopify article ID (gid://...)
-  keyword     String   // Keyword used for this blog
-  title       String   // Blog post title
-  status      String   // 'created', 'published', 'failed'
-  createdAt   DateTime @default(now())
-  publishedAt DateTime?
+  keyword          String   // Primary keyword used for this blog
+  title            String   // Blog post title
+  handle           String   // Blog post URL handle
+  status           String   // 'created', 'published', 'failed'
+
+  // Uniqueness tracking fields
+  primaryTopic     String   // Main topic focus (e.g., "Ultimate Guide to Products")
+  keywordsFocused  String[] @default([]) // Keywords used in this blog
+  contentHash      String   // Hash for duplicate detection
+  contentAngle     String   // Content approach: 'how-to', 'benefits', 'problems', 'comparison', 'trend'
+
+  createdAt        DateTime @default(now())
+  publishedAt      DateTime?
 
   @@index([shopDomain])
   @@index([keyword])
+  @@index([primaryTopic])
+  @@index([contentHash])
+  @@unique([shopDomain, contentHash])
 }
