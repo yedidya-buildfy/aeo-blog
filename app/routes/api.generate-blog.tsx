@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { KeywordAggregationService } from "../services/keyword-aggregation.service";
-import { BlogUniquenessService } from "../services/blog-uniqueness.service";
+import { AITopicGeneratorService } from "../services/ai-topic-generator.service";
 import { BlogGeneratorService } from "../services/blog-generator.service";
 import { ShopifyBlogService } from "../services/shopify-blog.service";
 import { ShopifyShopService } from "../services/shopify-shop.service";
@@ -69,9 +69,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`[GenerateBlog] Using ${keywordContext.totalKeywords} keywords for generation`);
 
-    // Step 4: Generate unique blog prompt
-    const uniquenessService = new BlogUniquenessService(prisma);
-    const blogPrompt = await uniquenessService.generateUniqueBlogPrompt(shopDomain, keywordContext);
+    // Step 4: Generate unique blog prompt using AI
+    console.log(`[GenerateBlog] Creating AITopicGeneratorService with prisma:`, !!prisma);
+    const topicGenerator = new AITopicGeneratorService(prisma);
+    console.log(`[GenerateBlog] AITopicGeneratorService created, calling generateUniqueBlogPrompt`);
+    const blogPrompt = await topicGenerator.generateUniqueBlogPrompt(shopDomain, keywordContext, `https://${shopDomain}/`);
+    console.log(`[GenerateBlog] Generated blog prompt:`, blogPrompt.title);
 
     if (!blogPrompt.isUnique) {
       console.warn(`[GenerateBlog] Generated blog prompt may not be fully unique for ${shopDomain}`);

@@ -87,3 +87,15 @@ model AEOContent {
   @@index([shopDomain])
   @@index([sourceUrl])
 }
+
+model TopicBatch {
+  id         String   @id @default(cuid())
+  shopDomain String
+  batchNumber Int
+  topics     String   // JSON string containing GeneratedTopic[]
+  usedTopics String   // JSON string containing used topic titles
+  createdAt  DateTime @default(now())
+
+  @@unique([shopDomain, batchNumber])
+  @@index([shopDomain])
+}

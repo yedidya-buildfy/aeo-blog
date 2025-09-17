@@ -1,5 +1,5 @@
 import type { KeywordContext } from './keyword-aggregation.service';
-import type { BlogPrompt } from './blog-uniqueness.service';
+import type { BlogPrompt } from './ai-topic-generator.service';
 import { franc } from 'franc';
 
 export interface GeneratedBlog {
@@ -47,7 +47,7 @@ export class BlogGeneratorService {
         temperature: 0.7,
         topP: 0.9,
         topK: 40,
-        maxOutputTokens: 4096,
+        maxOutputTokens: 2000,
         stopSequences: []
       }
     };
@@ -77,7 +77,15 @@ export class BlogGeneratorService {
       }
 
       const candidate = data.candidates[0];
+
+      // Handle MAX_TOKENS with fallback content
+      if (candidate.finishReason === 'MAX_TOKENS') {
+        console.warn('[BlogGenerator] Response was truncated due to MAX_TOKENS, using available content');
+        // Continue processing - we'll handle truncated content in parseBlogContent
+      }
+
       if (!candidate || !candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+        console.error('[BlogGenerator] Invalid response structure:', JSON.stringify(candidate, null, 2));
         throw new Error('Invalid response structure from Gemini API');
       }
 
@@ -111,36 +119,18 @@ export class BlogGeneratorService {
     const shuffledKeywords = allKeywords.sort(() => Math.random() - 0.5);
     const sampleKeywords = shuffledKeywords.slice(0, Math.min(numKeywords, allKeywords.length)).join(', ');
 
-    return `Write a well-structured SEO blog post in ${detectedLanguage} about: ${prompt.title}
+    return `Write an SEO blog post in ${detectedLanguage} about: ${prompt.title}
 
-Use these keywords naturally: ${sampleKeywords}
+Keywords: ${sampleKeywords}
 
-Requirements:
-- 900–1,000 words, clear and easy to read (short paragraphs, plain language).
-- Start with a strong hook in the introduction.
-- Use H2/H3 headings with keyword phrases for structure.
-- Add lists, bullet points, and bold/italic text for skimmability.
-- Include actionable tips, examples, and data (where relevant).
-- Optimize for search intent: answer real user questions clearly.
-- End with a persuasive call-to-action linked to ${brandName || 'the brand'} and ${storeUrl}.
-- Include internal links (where possible) and suggestions for visuals.
+Requirements: 400-500 words, clear structure with H2 headings, include actionable tips.
 
-Format exactly as:
-
-TITLE:
-[SEO-optimized engaging title different from: ${prompt.title}]
-
-SUMMARY:
-[2–3 sentence summary with keywords]
-
-META_DESCRIPTION:
-[150–160 characters, compelling, keyword-rich]
-
-TAGS:
-[5–8 relevant tags]
-
-CONTENT:
-[Full blog in HTML, 900–1,000 words]`;
+Format:
+TITLE: [engaging title]
+SUMMARY: [2 sentences with keywords]
+META_DESCRIPTION: [160 chars max]
+TAGS: [6 tags]
+CONTENT: [HTML blog content, 400-500 words]`;
   }
 
 
@@ -242,21 +232,25 @@ CONTENT:
   }
 
   private generateFallbackContent(title: string, keywordContext: KeywordContext): string {
-    return `<h2>Introduction</h2>
-<p>Welcome to this comprehensive guide about ${title.toLowerCase()}. In today's competitive market, understanding ${keywordContext.mainProducts[0] || 'key business solutions'} is essential for success.</p>
+    const mainKeyword = keywordContext.mainProducts[0] || keywordContext.problemsSolved[0] || 'this topic';
+    const problemKeyword = keywordContext.problemsSolved[0] || 'common challenges';
+    const customerKeyword = keywordContext.customerSearches[0] || 'your needs';
 
-<h2>Key Benefits</h2>
+    return `<h2>Introduction</h2>
+<p>Welcome to this comprehensive guide about ${title.toLowerCase()}. Understanding ${mainKeyword} can help you achieve your goals and improve your experience.</p>
+
+<h2>Key Points</h2>
 <ul>
-<li>Improved business efficiency</li>
-<li>Better customer satisfaction</li>
-<li>Increased competitive advantage</li>
+<li>Learn essential information about ${mainKeyword}</li>
+<li>Discover practical solutions and tips</li>
+<li>Get actionable advice you can implement today</li>
 </ul>
 
 <h2>Getting Started</h2>
-<p>To begin implementing these strategies, focus on ${keywordContext.problemsSolved[0] || 'addressing your main challenges'} and ${keywordContext.customerSearches[0] || 'meeting customer needs'}.</p>
+<p>To begin, focus on understanding ${problemKeyword} and how to address ${customerKeyword} effectively.</p>
 
 <h2>Next Steps</h2>
-<p>Ready to take action? Start by implementing these practical tips and see the difference they can make for your business.</p>`;
+<p>Ready to learn more? Continue reading to discover valuable insights and practical tips that can make a real difference.</p>`;
   }
 
   private detectLanguage(keywords: string[]): string {

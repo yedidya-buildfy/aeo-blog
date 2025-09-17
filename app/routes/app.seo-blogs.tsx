@@ -20,6 +20,54 @@ import { GeminiService } from "../services/gemini.service";
 import { ShopifyShopService } from "../services/shopify-shop.service";
 import prisma from "../db.server";
 
+// Language-aware fallback keywords function
+function getFallbackKeywordsByLanguage(url: string) {
+  // Simple language detection based on URL domain
+  const isHebrew = url.includes('.co.il') || url.includes('hebrew') || url.includes('israel');
+  const isSpanish = url.includes('.es') || url.includes('.mx') || url.includes('.ar') || url.includes('.co') || url.includes('.pe');
+  const isFrench = url.includes('.fr') || url.includes('.ca');
+  const isGerman = url.includes('.de') || url.includes('.at') || url.includes('.ch');
+
+  if (isHebrew) {
+    return {
+      mainProducts: ['מוצרי ניקוי', 'ציפויים מגנים', 'טיפול משטחים', 'פתרונות תחזוקה', 'מוצרי טיפוח'],
+      problemsSolved: ['הסרת כתמים', 'הגנה על משטחים', 'ניקוי קל', 'דחיית מים', 'תחזוקה'],
+      customerSearches: ['איך לנקות', 'הגנה על משטחים', 'פתרון ניקוי', 'טיפים תחזוקה', 'טיפוח מוצרים']
+    };
+  }
+
+  if (isSpanish) {
+    return {
+      mainProducts: ['productos de limpieza', 'recubrimientos protectores', 'tratamiento de superficies', 'soluciones de mantenimiento', 'productos de cuidado'],
+      problemsSolved: ['eliminación de manchas', 'protección de superficies', 'limpieza fácil', 'repelente al agua', 'mantenimiento'],
+      customerSearches: ['cómo limpiar', 'protección de superficies', 'solución de limpieza', 'consejos de mantenimiento', 'cuidado de productos']
+    };
+  }
+
+  if (isFrench) {
+    return {
+      mainProducts: ['produits de nettoyage', 'revêtements protecteurs', 'traitement de surface', 'solutions d\'entretien', 'produits de soin'],
+      problemsSolved: ['élimination des taches', 'protection de surface', 'nettoyage facile', 'hydrofuge', 'entretien'],
+      customerSearches: ['comment nettoyer', 'protection de surface', 'solution de nettoyage', 'conseils d\'entretien', 'soin des produits']
+    };
+  }
+
+  if (isGerman) {
+    return {
+      mainProducts: ['Reinigungsprodukte', 'Schutzbeschichtungen', 'Oberflächenbehandlung', 'Wartungslösungen', 'Pflegeprodukte'],
+      problemsSolved: ['Fleckenentfernung', 'Oberflächenschutz', 'einfache Reinigung', 'wasserabweisend', 'Wartung'],
+      customerSearches: ['wie reinigen', 'Oberflächenschutz', 'Reinigungslösung', 'Wartungstipps', 'Produktpflege']
+    };
+  }
+
+  // Default to English
+  return {
+    mainProducts: ['cleaning products', 'protective coatings', 'surface treatment', 'maintenance solutions', 'care products'],
+    problemsSolved: ['stain removal', 'surface protection', 'easy cleaning', 'water repelling', 'maintenance'],
+    customerSearches: ['how to clean', 'surface protection', 'cleaning solution', 'maintenance tips', 'product care']
+  };
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const { admin } = await authenticate.admin(request);
@@ -307,13 +355,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         console.log('Response length:', generatedText.length, 'characters');
 
         if (!generatedText || generatedText.trim().length === 0) {
-          console.log('⚠️  Empty response received, using fallback keywords');
-          // Fallback keywords for common cleaning/coating business
-          keywordData = {
-            mainProducts: ['cleaning products', 'protective coatings', 'surface treatment', 'maintenance solutions', 'care products'],
-            problemsSolved: ['stain removal', 'surface protection', 'easy cleaning', 'water repelling', 'maintenance'],
-            customerSearches: ['how to clean', 'surface protection', 'cleaning solution', 'maintenance tips', 'product care']
-          };
+          console.log('⚠️  Empty response received from Gemini API');
+          throw new Error('Failed to analyze website content. The AI service returned an empty response. Please try again.');
         } else {
           keywordData = extractKeywordsFromText(generatedText);
         }
