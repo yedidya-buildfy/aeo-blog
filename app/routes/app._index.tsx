@@ -164,20 +164,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ success: false, error: 'Missing file type or content' }, { status: 400 });
       }
 
-      const shop = await shopService.getShop();
+      const shopDomain = await shopService.getShopDomain();
 
-      // Get or create AEOContent record
+      // 1. Create backup before making changes (following same logic as improve AEO flow)
+      const existingContent = fileType === 'robots'
+        ? await themeService.getRobotsFile()
+        : await themeService.getLlmsFile();
+
+      if (existingContent) {
+        const filename = fileType === 'robots' ? 'robots.txt.liquid' : 'llms.txt.liquid';
+        await backupService.createBackup(shopDomain, filename, existingContent);
+        console.log(`Created backup for ${filename} before manual update`);
+      }
+
+      // 2. Get or create AEOContent record
       let aeoContent = await prisma.aEOContent.findFirst({
-        where: { shopDomain: shop.domain },
+        where: { shopDomain },
         orderBy: { createdAt: 'desc' }
       });
 
       if (!aeoContent) {
+        // Get homepage URL for new record
+        const homepageUrl = await shopService.getHomepageUrl();
+
         // Create new record if doesn't exist
         aeoContent = await prisma.aEOContent.create({
           data: {
-            shopDomain: shop.domain,
-            sourceUrl: shop.homepageUrl,
+            shopDomain,
+            sourceUrl: homepageUrl,
             llmsContent: '',
             robotsContent: '',
             status: 'active'
@@ -185,8 +199,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
 
-      // Update the appropriate field and Shopify theme file
+      // 3. Update the appropriate field and Shopify theme file (same logic as improve AEO)
       if (fileType === 'robots') {
+        // Update database first
         await prisma.aEOContent.update({
           where: { id: aeoContent.id },
           data: {
@@ -196,11 +211,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         });
 
+        // Update theme file using same service method as improve AEO flow
+        console.log('Updating robots.txt.liquid with user content...');
         const robotsUpdated = await themeService.updateRobotsFile(content);
         if (!robotsUpdated) {
           return json({ success: false, error: 'Failed to update robots.txt in theme' });
         }
       } else if (fileType === 'llms') {
+        // Update database first
         await prisma.aEOContent.update({
           where: { id: aeoContent.id },
           data: {
@@ -210,6 +228,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         });
 
+        // Update theme file using same service method as improve AEO flow
+        console.log('Updating llms.txt.liquid with user content...');
         const llmsUpdated = await themeService.updateLlmsFile(content);
         if (!llmsUpdated) {
           return json({ success: false, error: 'Failed to update llms.txt in theme' });
@@ -218,7 +238,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ success: false, error: 'Invalid file type' }, { status: 400 });
       }
 
-      console.log(`Successfully updated ${fileType}.txt`);
+      console.log(`Successfully updated ${fileType}.txt in both database and theme`);
       return json({ success: true, message: `${fileType}.txt updated successfully` });
     } else {
       return json({ success: false, error: 'Invalid action type' }, { status: 400 });
