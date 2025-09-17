@@ -14,6 +14,7 @@ import {
   Banner,
   Spinner,
   Divider,
+  TextField,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -154,6 +155,71 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       return json(result);
+    } else if (actionType === 'updateFile') {
+      console.log("Starting file update...");
+      const fileType = formData.get('fileType') as string;
+      const content = formData.get('content') as string;
+
+      if (!fileType || !content) {
+        return json({ success: false, error: 'Missing file type or content' }, { status: 400 });
+      }
+
+      const shop = await shopService.getShop();
+
+      // Get or create AEOContent record
+      let aeoContent = await prisma.aEOContent.findFirst({
+        where: { shopDomain: shop.domain },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (!aeoContent) {
+        // Create new record if doesn't exist
+        aeoContent = await prisma.aEOContent.create({
+          data: {
+            shopDomain: shop.domain,
+            sourceUrl: shop.homepageUrl,
+            llmsContent: '',
+            robotsContent: '',
+            status: 'active'
+          }
+        });
+      }
+
+      // Update the appropriate field and Shopify theme file
+      if (fileType === 'robots') {
+        await prisma.aEOContent.update({
+          where: { id: aeoContent.id },
+          data: {
+            robotsContent: content,
+            version: aeoContent.version + 1,
+            updatedAt: new Date()
+          }
+        });
+
+        const robotsUpdated = await themeService.updateRobotsFile(content);
+        if (!robotsUpdated) {
+          return json({ success: false, error: 'Failed to update robots.txt in theme' });
+        }
+      } else if (fileType === 'llms') {
+        await prisma.aEOContent.update({
+          where: { id: aeoContent.id },
+          data: {
+            llmsContent: content,
+            version: aeoContent.version + 1,
+            updatedAt: new Date()
+          }
+        });
+
+        const llmsUpdated = await themeService.updateLlmsFile(content);
+        if (!llmsUpdated) {
+          return json({ success: false, error: 'Failed to update llms.txt in theme' });
+        }
+      } else {
+        return json({ success: false, error: 'Invalid file type' }, { status: 400 });
+      }
+
+      console.log(`Successfully updated ${fileType}.txt`);
+      return json({ success: true, message: `${fileType}.txt updated successfully` });
     } else {
       return json({ success: false, error: 'Invalid action type' }, { status: 400 });
     }
@@ -179,6 +245,9 @@ export default function AEODashboard() {
   
   const [status, setStatus] = useState(initialStatus);
   const [selectedFile, setSelectedFile] = useState<'robots' | 'llms' | null>(null);
+  const [editMode, setEditMode] = useState<'robots' | 'llms' | null>(null);
+  const [editContent, setEditContent] = useState<string>('');
+  const [hasChanges, setHasChanges] = useState(false);
   const fileContentRef = useRef<HTMLDivElement>(null);
   
   const isLoading = fetcher.state === "submitting";
@@ -232,6 +301,28 @@ export default function AEODashboard() {
 
   const handleFileToggle = (file: 'robots' | 'llms') => {
     setSelectedFile(selectedFile === file ? null : file);
+  };
+
+  const handleEdit = (file: 'robots' | 'llms') => {
+    setEditMode(file);
+    setEditContent(file === 'robots' ? status?.currentRobots || '' : status?.currentLlms || '');
+    setHasChanges(false);
+  };
+
+  const handleSave = () => {
+    const formData = new FormData();
+    formData.append('actionType', 'updateFile');
+    formData.append('fileType', editMode!);
+    formData.append('content', editContent);
+    fetcher.submit(formData, { method: 'POST' });
+    setEditMode(null);
+    setHasChanges(false);
+  };
+
+  const handleCancel = () => {
+    setEditMode(null);
+    setEditContent('');
+    setHasChanges(false);
   };
 
   // Handle clicks outside the file content area
@@ -501,30 +592,64 @@ export default function AEODashboard() {
                       <BlockStack gap="200">
                         <InlineStack align="space-between">
                           <Text as="h3" variant="headingMd">
-                            robots.txt
+                            {editMode === 'robots' ? 'robots.txt - Editing' : 'robots.txt'}
                           </Text>
-                          <Badge>
-                            {status?.currentRobots ? 'Active' : 'Not Found'}
-                          </Badge>
+                          <InlineStack gap="200">
+                            <Badge>
+                              {status?.currentRobots ? 'Active' : 'Not Found'}
+                            </Badge>
+                            {editMode !== 'robots' && status?.currentRobots && (
+                              <Button size="slim" onClick={() => handleEdit('robots')}>
+                                Edit
+                              </Button>
+                            )}
+                          </InlineStack>
                         </InlineStack>
 
-                        {status?.currentRobots ? (
-                          <Card background="bg-surface-secondary">
-                            <pre style={{
-                              fontFamily: 'monospace',
-                              fontSize: '12px',
-                              margin: 0,
-                              whiteSpace: 'pre-wrap',
-                              maxHeight: '400px',
-                              overflow: 'auto'
-                            }}>
-                              {status.currentRobots}
-                            </pre>
-                          </Card>
+                        {editMode === 'robots' ? (
+                          <BlockStack gap="300">
+                            <TextField
+                              label=""
+                              value={editContent}
+                              onChange={(value) => {
+                                setEditContent(value);
+                                setHasChanges(true);
+                              }}
+                              multiline={10}
+                              autoComplete="off"
+                              helpText="Edit the robots.txt content below"
+                            />
+                            <InlineStack gap="200">
+                              <Button onClick={handleCancel}>Cancel</Button>
+                              <Button
+                                variant="primary"
+                                onClick={handleSave}
+                                disabled={!hasChanges}
+                                loading={isLoading && fetcher.formData?.get('actionType') === 'updateFile'}
+                              >
+                                Save Changes
+                              </Button>
+                            </InlineStack>
+                          </BlockStack>
                         ) : (
-                          <Text as="p" variant="bodyMd" tone="subdued">
-                            No robots.txt file found
-                          </Text>
+                          status?.currentRobots ? (
+                            <Card background="bg-surface-secondary">
+                              <pre style={{
+                                fontFamily: 'monospace',
+                                fontSize: '12px',
+                                margin: 0,
+                                whiteSpace: 'pre-wrap',
+                                maxHeight: '400px',
+                                overflow: 'auto'
+                              }}>
+                                {status.currentRobots}
+                              </pre>
+                            </Card>
+                          ) : (
+                            <Text as="p" variant="bodyMd" tone="subdued">
+                              No robots.txt file found
+                            </Text>
+                          )
                         )}
                       </BlockStack>
                     )}
@@ -533,30 +658,64 @@ export default function AEODashboard() {
                       <BlockStack gap="200">
                         <InlineStack align="space-between">
                           <Text as="h3" variant="headingMd">
-                            llms.txt
+                            {editMode === 'llms' ? 'llms.txt - Editing' : 'llms.txt'}
                           </Text>
-                          <Badge>
-                            {status?.currentLlms ? 'Active' : 'Not Found'}
-                          </Badge>
+                          <InlineStack gap="200">
+                            <Badge>
+                              {status?.currentLlms ? 'Active' : 'Not Found'}
+                            </Badge>
+                            {editMode !== 'llms' && status?.currentLlms && (
+                              <Button size="slim" onClick={() => handleEdit('llms')}>
+                                Edit
+                              </Button>
+                            )}
+                          </InlineStack>
                         </InlineStack>
 
-                        {status?.currentLlms ? (
-                          <Card background="bg-surface-secondary">
-                            <pre style={{
-                              fontFamily: 'monospace',
-                              fontSize: '12px',
-                              margin: 0,
-                              whiteSpace: 'pre-wrap',
-                              maxHeight: '400px',
-                              overflow: 'auto'
-                            }}>
-                              {status.currentLlms}
-                            </pre>
-                          </Card>
+                        {editMode === 'llms' ? (
+                          <BlockStack gap="300">
+                            <TextField
+                              label=""
+                              value={editContent}
+                              onChange={(value) => {
+                                setEditContent(value);
+                                setHasChanges(true);
+                              }}
+                              multiline={10}
+                              autoComplete="off"
+                              helpText="Edit the llms.txt content below"
+                            />
+                            <InlineStack gap="200">
+                              <Button onClick={handleCancel}>Cancel</Button>
+                              <Button
+                                variant="primary"
+                                onClick={handleSave}
+                                disabled={!hasChanges}
+                                loading={isLoading && fetcher.formData?.get('actionType') === 'updateFile'}
+                              >
+                                Save Changes
+                              </Button>
+                            </InlineStack>
+                          </BlockStack>
                         ) : (
-                          <Text as="p" variant="bodyMd" tone="subdued">
-                            No llms.txt file found
-                          </Text>
+                          status?.currentLlms ? (
+                            <Card background="bg-surface-secondary">
+                              <pre style={{
+                                fontFamily: 'monospace',
+                                fontSize: '12px',
+                                margin: 0,
+                                whiteSpace: 'pre-wrap',
+                                maxHeight: '400px',
+                                overflow: 'auto'
+                              }}>
+                                {status.currentLlms}
+                              </pre>
+                            </Card>
+                          ) : (
+                            <Text as="p" variant="bodyMd" tone="subdued">
+                              No llms.txt file found
+                            </Text>
+                          )
                         )}
                       </BlockStack>
                     )}

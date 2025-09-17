@@ -74,14 +74,15 @@ model BlogPost {
 }
 
 model AEOContent {
-  id          String   @id @default(cuid())
-  shopDomain  String
-  sourceUrl   String
-  llmsContent String
-  version     Int      @default(1)
-  status      String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(cuid())
+  shopDomain    String
+  sourceUrl     String
+  llmsContent   String
+  robotsContent String   @default("")
+  version       Int      @default(1)
+  status        String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([shopDomain])
   @@index([sourceUrl])
