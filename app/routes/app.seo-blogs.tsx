@@ -139,7 +139,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const shopService = new ShopifyShopService(admin);
     const geminiService = new GeminiService();
 
-    if (actionType === 'findKeywords') {
+    if (actionType === 'findKeywords' || actionType === 'regenerateKeywords') {
       // Use custom URL if provided, otherwise use shop's domain
       let homepageUrl;
       if (customUrl && typeof customUrl === 'string' && customUrl.trim()) {
@@ -148,6 +148,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const shopService = new ShopifyShopService(admin);
         const shopInfo = await shopService.getShopInfo();
         homepageUrl = `https://${shopInfo.primaryDomain}/`;
+      }
+
+      // If this is regeneration, delete existing keywords first
+      if (actionType === 'regenerateKeywords') {
+        const shopService = new ShopifyShopService(admin);
+        const shopInfo = await shopService.getShopInfo();
+        const shopDomain = shopInfo.primaryDomain || 'unknown';
+
+        try {
+          await prisma.keywordAnalysis.deleteMany({
+            where: {
+              shopDomain: shopDomain
+            }
+          });
+          console.log('Deleted existing keywords for regeneration');
+        } catch (dbError) {
+          console.error('Failed to delete existing keywords:', dbError);
+          // Continue anyway - we'll create new ones
+        }
       }
 
       // Generate keywords using Gemini with URL context - work WITH its natural descriptive style
@@ -408,296 +427,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({
         success: true,
         keywordData,
-        homepageUrl
-      });
-    }
-
-    if (actionType === 'regenerateKeywords') {
-      // Same logic as findKeywords but first delete existing keywords
-      let homepageUrl;
-      if (customUrl && typeof customUrl === 'string' && customUrl.trim()) {
-        homepageUrl = customUrl.startsWith('http') ? customUrl : `https://${customUrl}`;
-      } else {
-        const shopService = new ShopifyShopService(admin);
-        const shopInfo = await shopService.getShopInfo();
-        homepageUrl = `https://${shopInfo.primaryDomain}/`;
-      }
-
-      // Delete existing keywords for this shop first
-      const shopService = new ShopifyShopService(admin);
-      const shopInfo = await shopService.getShopInfo();
-      const shopDomain = shopInfo.primaryDomain || 'unknown';
-
-      try {
-        await prisma.keywordAnalysis.deleteMany({
-          where: {
-            shopDomain: shopDomain
-          }
-        });
-        console.log('Deleted existing keywords for regeneration');
-      } catch (dbError) {
-        console.error('Failed to delete existing keywords:', dbError);
-        // Continue anyway - we'll create new ones
-      }
-
-      // Now use the same keyword generation logic as findKeywords
-      const keywordPrompt = `Analyze the website ${homepageUrl} and generate SEO keywords.
-
-      Please identify and list:
-
-      MAIN PRODUCTS/SERVICES:
-      List the specific products or services they sell, using the website's language.
-
-      PROBLEMS THEY SOLVE:
-      What issues do their products fix or prevent?
-
-      WHAT CUSTOMERS SEARCH FOR:
-      What terms would customers use to find these products?
-
-      For each category, provide 5-7 short keywords (2-4 words each) in the same language as the website.
-      Be specific and use terms that appear on the website.`;
-
-      const requestBody = {
-        contents: [{ parts: [{ text: keywordPrompt }] }],
-        tools: [{ url_context: {} }]
-      };
-
-      console.log('Making Gemini API request for regeneration:', JSON.stringify(requestBody, null, 2));
-
-      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': process.env.GEMINI_API_KEY || ''
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      console.log('Gemini API response status for regeneration:', response.status);
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        console.error('Gemini API error body:', errorBody);
-        throw new Error(`Gemini API error: ${response.status} - ${errorBody}`);
-      }
-
-      const data = await response.json();
-      const generatedText = data.candidates[0].content.parts[0].text.trim();
-
-      console.log('Gemini regeneration response:', generatedText.substring(0, 500));
-
-      // Use the same extraction logic as findKeywords
-      const extractKeywordsFromText = (text: string) => {
-        console.log('Analyzing text for keyword patterns...');
-
-        const keywords = {
-          mainProducts: [] as string[],
-          problemsSolved: [] as string[],
-          customerSearches: [] as string[]
-        };
-
-        // Split text into sections and clean
-        const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-
-        // Extract keywords using multiple strategies
-        let currentCategory = '';
-
-        for (const line of lines) {
-          // Detect section headers
-          if (line.toUpperCase().includes('MAIN PRODUCTS') || line.toUpperCase().includes('PRODUCTS') || line.includes('מוצרים')) {
-            currentCategory = 'mainProducts';
-            continue;
-          }
-          if (line.toUpperCase().includes('PROBLEMS') || line.toUpperCase().includes('SOLVE') || line.includes('בעיות')) {
-            currentCategory = 'problemsSolved';
-            continue;
-          }
-          if (line.toUpperCase().includes('CUSTOMERS') || line.toUpperCase().includes('SEARCH') || line.includes('לקוחות')) {
-            currentCategory = 'customerSearches';
-            continue;
-          }
-
-          // Extract keywords from current line
-          const extractedKeywords = extractKeywordsFromLine(line);
-
-          // If we're in a specific category, add to that category
-          if (currentCategory && extractedKeywords.length > 0) {
-            keywords[currentCategory as keyof typeof keywords].push(...extractedKeywords);
-          } else {
-            // Smart categorization based on content
-            extractedKeywords.forEach(keyword => {
-              if (isProductKeyword(keyword)) {
-                keywords.mainProducts.push(keyword);
-              } else if (isProblemKeyword(keyword)) {
-                keywords.problemsSolved.push(keyword);
-              } else {
-                keywords.customerSearches.push(keyword);
-              }
-            });
-          }
-        }
-
-        // Ensure minimum keywords per category with intelligent extraction
-        if (keywords.mainProducts.length < 3) {
-          keywords.mainProducts.push(...extractProductKeywords(text));
-        }
-        if (keywords.problemsSolved.length < 3) {
-          keywords.problemsSolved.push(...extractProblemKeywords(text));
-        }
-        if (keywords.customerSearches.length < 3) {
-          keywords.customerSearches.push(...extractSearchKeywords(text));
-        }
-
-        // Remove duplicates and limit to reasonable numbers
-        keywords.mainProducts = [...new Set(keywords.mainProducts)].slice(0, 8);
-        keywords.problemsSolved = [...new Set(keywords.problemsSolved)].slice(0, 8);
-        keywords.customerSearches = [...new Set(keywords.customerSearches)].slice(0, 8);
-
-        console.log('Extracted keyword categories successfully');
-        return keywords;
-      };
-
-      const extractKeywordsFromLine = (line: string): string[] => {
-        const keywords: string[] = [];
-
-        // Hebrew keywords pattern (common in the responses we saw)
-        const hebrewMatches = line.match(/[\u0590-\u05FF][\u0590-\u05FF\s]*[\u0590-\u05FF]/g) || [];
-        keywords.push(...hebrewMatches.filter(k => k.length > 2));
-
-        // Product patterns (S2, S5, etc. that we saw in responses)
-        const productMatches = line.match(/[sS]\d+[\s]*[^\.\n]*/g) || [];
-        keywords.push(...productMatches.map(k => k.trim()).filter(k => k.length > 2));
-
-        // Quoted terms
-        const quotedMatches = line.match(/"([^"]+)"/g) || [];
-        keywords.push(...quotedMatches.map(k => k.replace(/"/g, '').trim()));
-
-        // Bullet point content
-        if (line.includes('*') || line.includes('•') || line.includes('-')) {
-          const bulletContent = line.replace(/[*•-]\s*/, '').trim();
-          if (bulletContent.length > 2) {
-            keywords.push(bulletContent.split(/[:\(\)]/)[0].trim());
-          }
-        }
-
-        return keywords.filter(k => k && k.length > 2 && k.length < 50);
-      };
-
-      const isProductKeyword = (keyword: string): boolean => {
-        const productIndicators = ['coating', 'ציפוי', 'מגן', 'מסיר', 'kit', 'product', 'מוצר'];
-        return productIndicators.some(indicator => keyword.toLowerCase().includes(indicator));
-      };
-
-      const isProblemKeyword = (keyword: string): boolean => {
-        const problemIndicators = ['removal', 'הסרת', 'protection', 'הגנה', 'cleaning', 'ניקוי', 'prevent'];
-        return problemIndicators.some(indicator => keyword.toLowerCase().includes(indicator));
-      };
-
-      const extractProductKeywords = (text: string): string[] => {
-        const productPatterns = [
-          /[\u0590-\u05FF]+\s*coating/gi,
-          /ציפוי[\s\u0590-\u05FF]*/g,
-          /מגן[\s\u0590-\u05FF]*/g,
-          /מסיר[\s\u0590-\u05FF]*/g
-        ];
-
-        const keywords: string[] = [];
-        productPatterns.forEach(pattern => {
-          const matches = text.match(pattern) || [];
-          keywords.push(...matches.map(k => k.trim()));
-        });
-
-        return keywords.filter(k => k.length > 2).slice(0, 5);
-      };
-
-      const extractProblemKeywords = (text: string): string[] => {
-        const problemPatterns = [
-          /הסרת[\s\u0590-\u05FF]*/g,
-          /ניקוי[\s\u0590-\u05FF]*/g,
-          /הגנה[\s\u0590-\u05FF]*/g,
-          /cleaning[\s\w]*/gi,
-          /protection[\s\w]*/gi
-        ];
-
-        const keywords: string[] = [];
-        problemPatterns.forEach(pattern => {
-          const matches = text.match(pattern) || [];
-          keywords.push(...matches.map(k => k.trim()));
-        });
-
-        return keywords.filter(k => k.length > 2).slice(0, 5);
-      };
-
-      const extractSearchKeywords = (text: string): string[] => {
-        // General terms that customers might search for
-        const searchTerms = text.match(/[\u0590-\u05FF]{2,}[\s\u0590-\u05FF]*|[a-zA-Z]{3,}[\s\w]*/g) || [];
-        return searchTerms
-          .filter(k => k.length > 2 && k.length < 30)
-          .filter(k => !isProductKeyword(k) && !isProblemKeyword(k))
-          .slice(0, 5);
-      };
-
-      // Extract keywords from Gemini's response
-      let keywordData;
-      try {
-        console.log('Using Smart Text Extraction strategy for regeneration...');
-        console.log('Response length:', generatedText.length, 'characters');
-
-        if (!generatedText || generatedText.trim().length === 0) {
-          console.log('⚠️  Empty response received from Gemini API');
-          throw new Error('Failed to analyze website content. The AI service returned an empty response. Please try again.');
-        } else {
-          keywordData = extractKeywordsFromText(generatedText);
-        }
-
-        // Ensure we have valid data
-        keywordData.mainProducts = keywordData.mainProducts.filter((k: string) => k && k.length > 1);
-        keywordData.problemsSolved = keywordData.problemsSolved.filter((k: string) => k && k.length > 1);
-        keywordData.customerSearches = keywordData.customerSearches.filter((k: string) => k && k.length > 1);
-
-        console.log('✅ Successfully regenerated keywords');
-        console.log(`   - mainProducts: ${keywordData.mainProducts.length} items`);
-        console.log(`   - problemsSolved: ${keywordData.problemsSolved.length} items`);
-        console.log(`   - customerSearches: ${keywordData.customerSearches.length} items`);
-
-      } catch (error: any) {
-        console.log('❌ Text extraction failed:', error.message);
-        console.log('Response preview:', generatedText.substring(0, 300));
-        throw new Error('Failed to extract keywords from response');
-      }
-
-      // Save new keywords to database
-      try {
-        const allKeywords = [
-          ...keywordData.mainProducts,
-          ...keywordData.problemsSolved,
-          ...keywordData.customerSearches
-        ];
-
-        await prisma.keywordAnalysis.create({
-          data: {
-            shopDomain: shopDomain,
-            storeUrl: homepageUrl,
-            keywords: allKeywords, // Legacy field for backwards compatibility
-            mainProducts: keywordData.mainProducts,
-            problemsSolved: keywordData.problemsSolved,
-            customerSearches: keywordData.customerSearches
-          }
-        });
-
-        console.log('Regenerated keywords saved to database successfully:', allKeywords.length);
-      } catch (dbError) {
-        console.error('Failed to save regenerated keywords to database:', dbError);
-        // Continue anyway - don't fail the whole operation
-      }
-
-      return json({
-        success: true,
-        keywordData,
         homepageUrl,
-        regenerated: true
+        regenerated: actionType === 'regenerateKeywords'
       });
     }
+
 
     if (actionType === 'updateKeywords') {
       const keywordDataString = formData.get('keywordData');
