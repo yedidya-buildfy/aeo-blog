@@ -1,5 +1,6 @@
 import type { KeywordContext } from './keyword-aggregation.service';
 import type { BlogPrompt } from './blog-uniqueness.service';
+import { franc } from 'franc';
 
 export interface GeneratedBlog {
   title: string;
@@ -102,12 +103,15 @@ export class BlogGeneratorService {
       ...keywordContext.customerSearches
     ];
 
+    // Detect language from keywords using franc
+    const detectedLanguage = this.detectLanguage(allKeywords);
+
     // Randomly select 5-8 keywords
     const numKeywords = Math.floor(Math.random() * 4) + 5; // 5-8 keywords
     const shuffledKeywords = allKeywords.sort(() => Math.random() - 0.5);
     const sampleKeywords = shuffledKeywords.slice(0, Math.min(numKeywords, allKeywords.length)).join(', ');
 
-    return `Write a well-structured SEO blog post about: ${prompt.title}
+    return `Write a well-structured SEO blog post in ${detectedLanguage} about: ${prompt.title}
 
 Use these keywords naturally: ${sampleKeywords}
 
@@ -253,5 +257,35 @@ CONTENT:
 
 <h2>Next Steps</h2>
 <p>Ready to take action? Start by implementing these practical tips and see the difference they can make for your business.</p>`;
+  }
+
+  private detectLanguage(keywords: string[]): string {
+    const text = keywords.join(' ');
+
+    if (text.trim().length === 0) {
+      return 'English';
+    }
+
+    // Use franc to detect language
+    const languageCode = franc(text);
+
+    // Map common language codes to full language names
+    const languageMap: Record<string, string> = {
+      'eng': 'English',
+      'heb': 'Hebrew',
+      'ara': 'Arabic',
+      'spa': 'Spanish',
+      'fra': 'French',
+      'deu': 'German',
+      'ita': 'Italian',
+      'por': 'Portuguese',
+      'rus': 'Russian',
+      'jpn': 'Japanese',
+      'kor': 'Korean',
+      'cmn': 'Chinese',
+      'und': 'English' // undetermined -> default to English
+    };
+
+    return languageMap[languageCode] || 'English';
   }
 }

@@ -40,6 +40,7 @@ export class BackupService {
     shopDomain: string;
     sourceUrl: string;
     llmsContent: string;
+    robotsContent?: string;
     status: string;
   }): Promise<AEOContent> {
     // Get the next version number for this shop
@@ -49,6 +50,7 @@ export class BackupService {
     return await this.prisma.aEOContent.create({
       data: {
         ...data,
+        robotsContent: data.robotsContent || '',
         version,
       },
     });

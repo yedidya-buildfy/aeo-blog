@@ -63,6 +63,7 @@ export class AEOService {
         shopDomain,
         sourceUrl: homepageUrl,
         llmsContent: generatedLlmsContent,
+        robotsContent: UNIVERSAL_ROBOTS_TXT,
         status: 'generated'
       });
 
@@ -124,6 +125,7 @@ export class AEOService {
         shopDomain,
         sourceUrl: homepageUrl,
         llmsContent: generatedLlmsContent,
+        robotsContent: UNIVERSAL_ROBOTS_TXT,
         status: 'generated'
       });
       aeoContentId = aeoContent.id;
