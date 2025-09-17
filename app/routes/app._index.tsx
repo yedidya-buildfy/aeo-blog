@@ -377,6 +377,19 @@ export default function AEODashboard() {
     }
   };
 
+  const getSmartStatusBadge = () => {
+    const hasRobots = status?.currentRobots && status.currentRobots.trim().length > 0;
+    const hasLlms = status?.currentLlms && status.currentLlms.trim().length > 0;
+
+    if (!hasRobots && !hasLlms) {
+      return <Badge tone="critical">Empty</Badge>;
+    } else if (hasRobots && hasLlms) {
+      return <Badge tone="success">Working</Badge>;
+    } else {
+      return <Badge tone="warning">In Progress</Badge>;
+    }
+  };
+
   // Show loading state while authenticating
   if (loaderError === 'Failed to fetch status' && (!status || status.shopDomain === 'Authenticating...')) {
     return (
@@ -421,7 +434,8 @@ export default function AEODashboard() {
         {/* Main Action Card */}
         <Layout>
           <Layout.Section>
-            <Card>
+            <div style={{ display: 'flex', height: '100%' }}>
+              <Card>
               <BlockStack gap="400">
                 <BlockStack gap="200">
                   <Text as="h2" variant="headingLg">
@@ -482,61 +496,58 @@ export default function AEODashboard() {
                 </BlockStack>
               </BlockStack>
             </Card>
+            </div>
           </Layout.Section>
-          
-          {/* Status Sidebar */}
-          <Layout.Section variant="oneThird">
-            <BlockStack gap="400">
-              <Card>
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingMd">
-                    Status
-                  </Text>
-                  {status?.lastAEOContent ? (
-                    <BlockStack gap="200">
-                      <InlineStack align="space-between">
-                        <Text as="span" variant="bodyMd">Last AEO Generation</Text>
-                        {getStatusBadge(status.lastAEOContent.status)}
-                      </InlineStack>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Version {status.lastAEOContent.version} - {formatDateTime(status.lastAEOContent.createdAt)}
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Source: {status.lastAEOContent.sourceUrl}
-                      </Text>
-                    </BlockStack>
-                  ) : (
-                    <Text as="p" variant="bodyMd" tone="subdued">
-                      No AEO content generated yet
-                    </Text>
-                  )}
-                </BlockStack>
-              </Card>
 
+          {/* Status Info Sidebar */}
+          <Layout.Section variant="oneThird">
+            <div style={{ display: 'flex', height: '100%' }}>
               <Card>
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingMd">
-                    Store Info
-                  </Text>
-                  <BlockStack gap="100">
-                    <Text as="p" variant="bodyMd">
-                      <Text as="span" variant="bodyMd" fontWeight="semibold">Domain:</Text>{' '}
-                      {status?.shopDomain || 'Loading...'}
+                <BlockStack gap="400" align="space-between" inlineAlign="stretch">
+                  <BlockStack gap="400">
+                    <Text as="h3" variant="headingMd">
+                      Status Info
                     </Text>
-                    <Text as="p" variant="bodyMd">
-                      <Text as="span" variant="bodyMd" fontWeight="semibold">Homepage:</Text>{' '}
-                      {status?.homepageUrl ? (
-                        <a href={status.homepageUrl} target="_blank" rel="noopener noreferrer">
-                          {status.homepageUrl}
-                        </a>
-                      ) : (
-                        'Loading...'
-                      )}
-                    </Text>
+
+                    {/* Last AEO Generation Section */}
+                    <BlockStack gap="300">
+                      <Text as="h4" variant="headingSm">
+                        Last AEO Generation
+                      </Text>
+                      <BlockStack gap="200">
+                        <InlineStack align="space-between">
+                          <Text as="span" variant="bodyMd">Status</Text>
+                          {getSmartStatusBadge()}
+                        </InlineStack>
+                        {status?.lastAEOContent && (
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            Version {status.lastAEOContent.version} - {formatDateTime(status.lastAEOContent.createdAt)}
+                          </Text>
+                        )}
+                      </BlockStack>
+                    </BlockStack>
+
+                    {/* Homepage Section */}
+                    <BlockStack gap="300">
+                      <Text as="h4" variant="headingSm">
+                        Homepage
+                      </Text>
+                      <BlockStack gap="200">
+                        <Text as="p" variant="bodyMd">
+                          {status?.homepageUrl ? (
+                            <a href={status.homepageUrl} target="_blank" rel="noopener noreferrer">
+                              {status.homepageUrl}
+                            </a>
+                          ) : (
+                            'Loading...'
+                          )}
+                        </Text>
+                      </BlockStack>
+                    </BlockStack>
                   </BlockStack>
                 </BlockStack>
               </Card>
-            </BlockStack>
+            </div>
           </Layout.Section>
         </Layout>
 
