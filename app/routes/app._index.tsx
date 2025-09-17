@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher, useRevalidator } from "@remix-run/react";
@@ -178,6 +178,8 @@ export default function AEODashboard() {
   const shopify = useAppBridge();
   
   const [status, setStatus] = useState(initialStatus);
+  const [selectedFile, setSelectedFile] = useState<'robots' | 'llms' | null>(null);
+  const fileContentRef = useRef<HTMLDivElement>(null);
   
   const isLoading = fetcher.state === "submitting";
   const actionData = fetcher.data;
@@ -227,6 +229,29 @@ export default function AEODashboard() {
   const formatDateTime = (dateString: string) => {
     return new Date(dateString).toLocaleString();
   };
+
+  const handleFileToggle = (file: 'robots' | 'llms') => {
+    setSelectedFile(selectedFile === file ? null : file);
+  };
+
+  // Handle clicks outside the file content area
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (selectedFile && fileContentRef.current && !fileContentRef.current.contains(event.target as Node)) {
+        // Check if the click was not on the toggle buttons
+        const target = event.target as HTMLElement;
+        const isButtonClick = target.closest('button') || target.closest('[role="button"]');
+        if (!isButtonClick) {
+          setSelectedFile(null);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [selectedFile]);
 
   const getStatusBadge = (operationStatus: string) => {
     switch (operationStatus) {
@@ -321,6 +346,29 @@ export default function AEODashboard() {
                     </Button>
                   )}
                 </InlineStack>
+
+                {/* File Toggle Buttons */}
+                <BlockStack gap="300">
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    View current theme files:
+                  </Text>
+                  <InlineStack gap="300">
+                    <Button
+                      pressed={selectedFile === 'robots'}
+                      onClick={() => handleFileToggle('robots')}
+                      size="medium"
+                    >
+                      🤖 robots.txt
+                    </Button>
+                    <Button
+                      pressed={selectedFile === 'llms'}
+                      onClick={() => handleFileToggle('llms')}
+                      size="medium"
+                    >
+                      📄 llms.txt
+                    </Button>
+                  </InlineStack>
+                </BlockStack>
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -380,7 +428,7 @@ export default function AEODashboard() {
             </BlockStack>
           </Layout.Section>
         </Layout>
-        
+
         {/* Applied Files Section */}
         {actionData && actionData.success && actionData.generatedRobots && actionData.generatedLlms && fetcher.formData?.get('actionType') === 'improve' && (
           <Layout>
@@ -437,84 +485,88 @@ export default function AEODashboard() {
           </Layout>
         )}
         
-        {/* File Contents */}
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingLg">
-                  Current Files
-                </Text>
-                
-                <BlockStack gap="400">
-                  {/* Robots.txt */}
-                  <BlockStack gap="200">
-                    <InlineStack align="space-between">
-                      <Text as="h3" variant="headingMd">
-                        robots.txt
-                      </Text>
-                      <Badge>
-                        {status?.currentRobots ? 'Active' : 'Not Found'}
-                      </Badge>
-                    </InlineStack>
-                    
-                    {status?.currentRobots ? (
-                      <Card background="bg-surface-secondary">
-                        <pre style={{ 
-                          fontFamily: 'monospace', 
-                          fontSize: '12px', 
-                          margin: 0,
-                          whiteSpace: 'pre-wrap',
-                          maxHeight: '200px',
-                          overflow: 'auto'
-                        }}>
-                          {status.currentRobots}
-                        </pre>
-                      </Card>
-                    ) : (
-                      <Text as="p" variant="bodyMd" tone="subdued">
-                        No robots.txt file found
-                      </Text>
+        {/* File Contents - Only show when a file is selected */}
+        {selectedFile && (
+          <Layout>
+            <Layout.Section>
+              <Card>
+                <div ref={fileContentRef}>
+                  <BlockStack gap="400">
+                    <Text as="h2" variant="headingLg">
+                      Current Files
+                    </Text>
+
+                    <BlockStack gap="400">
+                    {selectedFile === 'robots' && (
+                      <BlockStack gap="200">
+                        <InlineStack align="space-between">
+                          <Text as="h3" variant="headingMd">
+                            robots.txt
+                          </Text>
+                          <Badge>
+                            {status?.currentRobots ? 'Active' : 'Not Found'}
+                          </Badge>
+                        </InlineStack>
+
+                        {status?.currentRobots ? (
+                          <Card background="bg-surface-secondary">
+                            <pre style={{
+                              fontFamily: 'monospace',
+                              fontSize: '12px',
+                              margin: 0,
+                              whiteSpace: 'pre-wrap',
+                              maxHeight: '400px',
+                              overflow: 'auto'
+                            }}>
+                              {status.currentRobots}
+                            </pre>
+                          </Card>
+                        ) : (
+                          <Text as="p" variant="bodyMd" tone="subdued">
+                            No robots.txt file found
+                          </Text>
+                        )}
+                      </BlockStack>
                     )}
-                  </BlockStack>
-                  
-                  <Divider />
-                  
-                  {/* LLMS.txt */}
-                  <BlockStack gap="200">
-                    <InlineStack align="space-between">
-                      <Text as="h3" variant="headingMd">
-                        llms.txt
-                      </Text>
-                      <Badge>
-                        {status?.currentLlms ? 'Active' : 'Not Found'}
-                      </Badge>
-                    </InlineStack>
-                    
-                    {status?.currentLlms ? (
-                      <Card background="bg-surface-secondary">
-                        <pre style={{ 
-                          fontFamily: 'monospace', 
-                          fontSize: '12px', 
-                          margin: 0,
-                          whiteSpace: 'pre-wrap',
-                          maxHeight: '300px',
-                          overflow: 'auto'
-                        }}>
-                          {status.currentLlms}
-                        </pre>
-                      </Card>
-                    ) : (
-                      <Text as="p" variant="bodyMd" tone="subdued">
-                        No llms.txt file found
-                      </Text>
+
+                    {selectedFile === 'llms' && (
+                      <BlockStack gap="200">
+                        <InlineStack align="space-between">
+                          <Text as="h3" variant="headingMd">
+                            llms.txt
+                          </Text>
+                          <Badge>
+                            {status?.currentLlms ? 'Active' : 'Not Found'}
+                          </Badge>
+                        </InlineStack>
+
+                        {status?.currentLlms ? (
+                          <Card background="bg-surface-secondary">
+                            <pre style={{
+                              fontFamily: 'monospace',
+                              fontSize: '12px',
+                              margin: 0,
+                              whiteSpace: 'pre-wrap',
+                              maxHeight: '400px',
+                              overflow: 'auto'
+                            }}>
+                              {status.currentLlms}
+                            </pre>
+                          </Card>
+                        ) : (
+                          <Text as="p" variant="bodyMd" tone="subdued">
+                            No llms.txt file found
+                          </Text>
+                        )}
+                      </BlockStack>
                     )}
+                    </BlockStack>
                   </BlockStack>
-                </BlockStack>
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
+                </div>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        )}
       </BlockStack>
     </Page>
   );
