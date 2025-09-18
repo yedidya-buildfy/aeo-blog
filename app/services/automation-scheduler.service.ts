@@ -72,34 +72,39 @@ export class AutomationSchedulerService {
       const now = new Date();
       const israelTime = this.convertToIsraelTime(now);
 
-      // TEST MODE: Check if it's 20:20 or later today (instead of Sunday 10 AM)
+      // Check if it's Sunday and after 10 AM Israel time
+      const dayOfWeek = israelTime.getDay(); // 0 = Sunday
       const currentHour = israelTime.getHours();
-      const currentMinute = israelTime.getMinutes();
-      const isAfterTestTime = currentHour > 20 || (currentHour === 20 && currentMinute >= 20);
 
-      console.log(`[AutomationScheduler] TEST MODE - Current Israel time: ${israelTime.toLocaleString('en-IL', { timeZone: 'Asia/Jerusalem' })}, isAfterTestTime: ${isAfterTestTime}`);
+      console.log(`[AutomationScheduler] Current Israel time: ${israelTime.toLocaleString('en-IL', { timeZone: 'Asia/Jerusalem' })}, Day: ${dayOfWeek}, Hour: ${currentHour}`);
 
-      if (!isAfterTestTime) {
+      if (dayOfWeek !== 0) { // Not Sunday
         return {
           shouldGenerate: false,
           schedule,
-          reason: `TEST MODE: Not after 20:20 IST yet (current: ${israelTime.toLocaleString('en-IL', { timeZone: 'Asia/Jerusalem' })})`
+          reason: `Not Sunday yet (current day: ${dayOfWeek})`
         };
       }
 
-      // TEST MODE: Check if we already generated in the last 5 minutes (instead of this week)
+      if (currentHour < 10) { // Before 10 AM
+        return {
+          shouldGenerate: false,
+          schedule,
+          reason: `Too early - before 10 AM IST (current: ${currentHour}:${israelTime.getMinutes().toString().padStart(2, '0')})`
+        };
+      }
+
+      // Check if we already generated this week
       if (schedule.lastGeneratedAt) {
         const lastGenerated = this.convertToIsraelTime(schedule.lastGeneratedAt);
-        const timeDiff = israelTime.getTime() - lastGenerated.getTime();
-        const minutesSinceLastGeneration = timeDiff / (1000 * 60);
+        const weekStart = this.getWeekStart(israelTime);
+        const lastGeneratedWeekStart = this.getWeekStart(lastGenerated);
 
-        console.log(`[AutomationScheduler] TEST MODE - Minutes since last generation: ${minutesSinceLastGeneration}`);
-
-        if (minutesSinceLastGeneration < 5) {
+        if (weekStart.getTime() === lastGeneratedWeekStart.getTime()) {
           return {
             shouldGenerate: false,
             schedule,
-            reason: `TEST MODE: Generated ${Math.floor(minutesSinceLastGeneration)} minutes ago, waiting 5 minutes between tests`
+            reason: `Already generated this week (last: ${lastGenerated.toLocaleString('en-IL', { timeZone: 'Asia/Jerusalem' })})`
           };
         }
       }

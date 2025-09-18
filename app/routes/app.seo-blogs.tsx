@@ -1051,75 +1051,6 @@ export default function SEOBlogs() {
                 </Text>
               </BlockStack>
 
-              {/* Weekly Automation Controls */}
-              <BlockStack gap="300">
-                <Text as="h3" variant="headingMd">
-                  🤖 Weekly Automation
-                </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Automatically post one SEO blog every Sunday at 10 AM Israel time
-                </Text>
-
-                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  {automationSchedule?.enabled ? (
-                    <>
-                      <Badge tone="success">Automation Enabled</Badge>
-                      <Button
-                        onClick={() => {
-                          const formData = new FormData();
-                          formData.append('actionType', 'disableAutomation');
-                          fetcher.submit(formData, { method: 'POST' });
-                        }}
-                        loading={isLoading && fetcher.formData?.get('actionType') === 'disableAutomation'}
-                      >
-                        Disable Weekly Automation
-                      </Button>
-                      {automationSchedule?.nextTargetDate && (
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Next blog: {new Date(automationSchedule.nextTargetDate).toLocaleDateString('en-IL', {
-                            timeZone: 'Asia/Jerusalem',
-                            weekday: 'long',
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })} IST
-                        </Text>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <Badge>Automation Disabled</Badge>
-                      <Button
-                        variant="primary"
-                        onClick={() => {
-                          const formData = new FormData();
-                          formData.append('actionType', 'enableAutomation');
-                          fetcher.submit(formData, { method: 'POST' });
-                        }}
-                        loading={isLoading && fetcher.formData?.get('actionType') === 'enableAutomation'}
-                      >
-                        Enable Weekly Automation
-                      </Button>
-                    </>
-                  )}
-                </div>
-
-                {automationSchedule?.lastGeneratedAt && (
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Last automated blog: {new Date(automationSchedule.lastGeneratedAt).toLocaleDateString('en-IL', {
-                      timeZone: 'Asia/Jerusalem',
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })} IST
-                  </Text>
-                )}
-              </BlockStack>
 
               {/* One-Click SEO Blog Generation */}
               <BlockStack gap="300">
@@ -1311,13 +1242,21 @@ export default function SEOBlogs() {
                   </Card>
                 )}
 
-              {/* Step 3: Start Automation (disabled for now) */}
+              {/* Step 3: Start Automation */}
               <BlockStack gap="300">
                 <Text as="h3" variant="headingMd">
                   Step 3: Start Automation
                 </Text>
-                <Button disabled variant="primary">
-                  Start Weekly Publishing (Coming Soon)
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    const formData = new FormData();
+                    formData.append('actionType', automationSchedule?.enabled ? 'disableAutomation' : 'enableAutomation');
+                    fetcher.submit(formData, { method: 'POST' });
+                  }}
+                  loading={isLoading && (fetcher.formData?.get('actionType') === 'enableAutomation' || fetcher.formData?.get('actionType') === 'disableAutomation')}
+                >
+                  {automationSchedule?.enabled ? 'Stop Weekly Publishing' : 'Start Weekly Publishing'}
                 </Button>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Automatically publishes 1 blog per week
