@@ -1,5 +1,6 @@
 import type { AdminApiContext } from '@shopify/shopify-app-remix/server';
 import { AutomationSchedulerService } from './automation-scheduler.service';
+import { BillingService } from './billing.service';
 import prisma from '../db.server';
 
 export class AutomationMiddlewareService {
@@ -55,6 +56,16 @@ export class AutomationMiddlewareService {
         return;
       }
 
+      // Check billing limits
+      const billingService = new BillingService(prisma, admin);
+      const canGenerateBlog = await billingService.canGenerateBlog(shopDomain);
+
+      if (!canGenerateBlog) {
+        const usage = await billingService.getUsage(shopDomain);
+        console.log(`[AutomationMiddleware] Blog limit reached for ${shopDomain}: ${usage.blogsGenerated}/${usage.blogLimit}`);
+        return;
+      }
+
       console.log(`[AutomationMiddleware] Starting automation for ${shopDomain}: ${checkResult.reason}`);
 
       // Mark this shop as having automation running
@@ -66,6 +77,9 @@ export class AutomationMiddlewareService {
 
         if (result.success) {
           console.log(`[AutomationMiddleware] Successfully generated automated blog for ${shopDomain}: ${result.title}`);
+          // Increment blog usage counter
+          await billingService.incrementBlogUsage(shopDomain);
+          console.log(`[AutomationMiddleware] Incremented blog usage for ${shopDomain}`);
         } else {
           console.error(`[AutomationMiddleware] Failed to generate automated blog for ${shopDomain}: ${result.error}`);
         }

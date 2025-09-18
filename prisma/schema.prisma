@@ -118,3 +118,32 @@ model AutomationSchedule {
   @@index([enabled])
   @@index([nextTargetDate])
 }
+
+model Subscription {
+  id              String    @id @default(cuid())
+  shopDomain      String    @unique
+  plan            String    @default("free") // "free", "starter", "pro"
+  shopifyChargeId String?   // Shopify subscription ID
+  status          String    @default("active") // "active", "cancelled", "declined"
+  billingOn       DateTime? // Next billing date
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([shopDomain])
+  @@index([plan])
+  @@index([status])
+}
+
+model UsageTracking {
+  id            String   @id @default(cuid())
+  shopDomain    String
+  weekStart     DateTime // Start of the week (Monday)
+  blogsGenerated Int     @default(0)
+  llmsGenerated Int      @default(0) // Track LLMs.txt generations
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([shopDomain, weekStart])
+  @@index([shopDomain])
+  @@index([weekStart])
+}

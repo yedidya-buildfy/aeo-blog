@@ -52,87 +52,39 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       backupService
     );
 
-    // Get status directly
+    // Get AEO status
     const status = await aeoService.getStatus();
 
-    // Load existing keywords from database
-    let existingKeywords = null;
-    try {
-      const keywordAnalysis = await prisma.keywordAnalysis.findFirst({
-        where: {
-          shopDomain: shopInfo.primaryDomain || 'unknown'
-        },
-        orderBy: {
-          updatedAt: 'desc'
-        }
-      });
+    // Calculate KPI metrics
+    const shopDomain = shopInfo.primaryDomain || 'unknown';
 
-      if (keywordAnalysis) {
-        // Check if we have categorized keywords, otherwise convert from legacy format
-        if (keywordAnalysis.mainProducts && keywordAnalysis.mainProducts.length > 0) {
-          existingKeywords = {
-            mainProducts: keywordAnalysis.mainProducts,
-            problemsSolved: keywordAnalysis.problemsSolved,
-            customerSearches: keywordAnalysis.customerSearches
-          };
-        } else if (keywordAnalysis.keywords && keywordAnalysis.keywords.length > 0) {
-          // Convert legacy flat keywords to categories (distribute evenly)
-          const totalKeywords = keywordAnalysis.keywords;
-          const thirds = Math.ceil(totalKeywords.length / 3);
+    // Get total blogs created
+    const totalBlogs = await prisma.blogPost.count({
+      where: { shopDomain }
+    });
 
-          existingKeywords = {
-            mainProducts: totalKeywords.slice(0, thirds),
-            problemsSolved: totalKeywords.slice(thirds, thirds * 2),
-            customerSearches: totalKeywords.slice(thirds * 2)
-          };
-        }
-      }
-    } catch (dbError) {
-      console.error('Failed to load keywords from database:', dbError);
-      // Continue without existing keywords - don't fail the whole loader
-    }
+    // Get first blog date to calculate weeks
+    const firstBlog = await prisma.blogPost.findFirst({
+      where: { shopDomain },
+      orderBy: { createdAt: 'asc' }
+    });
 
-    // Load automation schedule
-    let automationSchedule = null;
-    try {
-      const automationService = new AutomationSchedulerService(prisma);
-      automationSchedule = await automationService.getSchedule(shopInfo.primaryDomain || 'unknown');
-    } catch (automationError) {
-      console.error('Failed to load automation schedule:', automationError);
-    }
+    const weeksActive = firstBlog
+      ? Math.max(1, Math.ceil((Date.now() - firstBlog.createdAt.getTime()) / (1000 * 60 * 60 * 24 * 7)))
+      : 1;
 
-    // Load recent blog posts
-    let recentBlogs = [];
-    try {
-      recentBlogs = await prisma.blogPost.findMany({
-        where: {
-          shopDomain: shopInfo.primaryDomain || 'unknown'
-        },
-        orderBy: {
-          createdAt: 'desc'
-        },
-        take: 10, // Last 10 blogs
-        select: {
-          id: true,
-          title: true,
-          url: true,
-          status: true,
-          createdAt: true,
-          publishedAt: true,
-          primaryTopic: true,
-          contentAngle: true
-        }
-      });
-    } catch (blogError) {
-      console.error('Failed to load blog posts:', blogError);
-    }
+    // Calculate metrics
+    const kpiMetrics = {
+      totalBlogs,
+      aiSessions: 103 * weeksActive,
+      timeSavedMinutes: totalBlogs * 43,
+      timeSavedHours: Math.round((totalBlogs * 43) / 60 * 10) / 10, // Round to 1 decimal
+      weeksActive
+    };
 
     return json({
       status,
-      shopInfo,
-      existingKeywords,
-      automationSchedule,
-      recentBlogs,
+      kpiMetrics,
       error: null
     });
   } catch (error) {
@@ -148,11 +100,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         lastAEOContent: null,
         backups: [],
       },
-      shopInfo: null,
-      existingKeywords: null,
-      automationSchedule: null,
-      recentBlogs: [],
-      error: null
+      kpiMetrics: {
+        totalBlogs: 0,
+        aiSessions: 0,
+        timeSavedMinutes: 0,
+        timeSavedHours: 0,
+        weeksActive: 0
+      },
+      error: 'Authentication failed'
     });
   }
 };
@@ -160,8 +115,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const actionType = formData.get('actionType');
-  const selectedKeyword = formData.get('keyword');
-  const customUrl = formData.get('customUrl');
 
   try {
     const { admin } = await authenticate.admin(request);
@@ -380,7 +333,7 @@ interface KeywordData {
 }
 
 export default function AEODashboard() {
-  const { status: initialStatus, shopInfo, existingKeywords, automationSchedule, recentBlogs, error: loaderError } = useLoaderData<typeof loader>();
+  const { status: initialStatus, kpiMetrics, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
@@ -697,16 +650,44 @@ export default function AEODashboard() {
     <Page>
       <TitleBar title="AEO One-Click (Gemini Direct)" />
 
-      <Layout>
-        {/* Blog Posts Sidebar - Left Column */}
-        <Layout.Section variant="oneThird">
+      <BlockStack gap="500">
+        {/* KPI Metrics Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
           <Card>
-            <BlockStack gap="400">
-              <Text as="h3" variant="headingMd">
-                📝 Your Generated Blogs
-              </Text>
+            <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+              <Text as="h3" variant="headingMd" fontWeight="medium">Blogs Generated</Text>
+              <div style={{ margin: '1rem 0' }}>
+                <Text as="p" variant="heading3xl" fontWeight="bold">{kpiMetrics?.totalBlogs || 0}</Text>
+              </div>
+              <Text as="p" variant="bodyMd" tone="subdued">Total blogs created</Text>
+            </div>
+          </Card>
+          <Card>
+            <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+              <Text as="h3" variant="headingMd" fontWeight="medium">AI Sessions</Text>
+              <div style={{ margin: '1rem 0' }}>
+                <Text as="p" variant="heading3xl" fontWeight="bold">{kpiMetrics?.aiSessions || 0}</Text>
+              </div>
+              <Text as="p" variant="bodyMd" tone="subdued">Estimated AI interactions</Text>
+            </div>
+          </Card>
+          <Card>
+            <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+              <Text as="h3" variant="headingMd" fontWeight="medium">Time Saved</Text>
+              <div style={{ margin: '1rem 0' }}>
+                <Text as="p" variant="heading3xl" fontWeight="bold">{kpiMetrics?.timeSavedHours || 0}h</Text>
+              </div>
+              <Text as="p" variant="bodyMd" tone="subdued">Hours saved with automation</Text>
+            </div>
+          </Card>
+        </div>
 
-              {recentBlogs.length > 0 ? (
+        {/* Main Action Card */}
+        <Layout>
+          <Layout.Section>
+            <div style={{ display: 'flex', height: '100%' }}>
+              <Card>
+              <BlockStack gap="400">
                 <BlockStack gap="200">
                   {recentBlogs.map((blog: any) => (
                     <Card key={blog.id} background="bg-surface-secondary">
@@ -872,7 +853,7 @@ export default function AEODashboard() {
 
       <BlockStack gap="500">
         {/* Applied Files Section */}
-        {actionData && actionData.success && actionData.generatedRobots && actionData.generatedLlms && fetcher.formData?.get('actionType') === 'improve' && (
+        {actionData && actionData.success && 'generatedRobots' in actionData && 'generatedLlms' in actionData && fetcher.formData?.get('actionType') === 'improve' && (
           <Layout>
             <Layout.Section>
               <Card>
@@ -881,7 +862,7 @@ export default function AEODashboard() {
                     Applied AEO Files
                   </Text>
                   <Text as="p" variant="bodyMd" tone="success">
-                    Files successfully applied to your theme for: {actionData.homepageUrl}
+                    Files successfully applied to your theme for: {'homepageUrl' in actionData ? actionData.homepageUrl : 'your store'}
                   </Text>
                   
                   <Divider />
@@ -894,12 +875,12 @@ export default function AEODashboard() {
                       </Text>
                       <Card background="bg-surface-secondary">
                         <pre style={{ 
-                          whiteSpace: 'pre-wrap', 
-                          margin: 0, 
+                          whiteSpace: 'pre-wrap',
+                          margin: 0,
                           fontSize: '12px',
                           fontFamily: 'Monaco, "Lucida Console", monospace'
                         }}>
-                          {actionData.generatedRobots}
+                          {'generatedRobots' in actionData ? actionData.generatedRobots : ''}
                         </pre>
                       </Card>
                     </BlockStack>
@@ -911,12 +892,12 @@ export default function AEODashboard() {
                       </Text>
                       <Card background="bg-surface-secondary">
                         <pre style={{ 
-                          whiteSpace: 'pre-wrap', 
-                          margin: 0, 
+                          whiteSpace: 'pre-wrap',
+                          margin: 0,
                           fontSize: '12px',
                           fontFamily: 'Monaco, "Lucida Console", monospace'
                         }}>
-                          {actionData.generatedLlms}
+                          {'generatedLlms' in actionData ? actionData.generatedLlms : ''}
                         </pre>
                       </Card>
                     </BlockStack>
@@ -1078,238 +1059,7 @@ export default function AEODashboard() {
           </Layout>
         )}
 
-        {/* SEO Blog Generation Card */}
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="400">
-                <BlockStack gap="200">
-                  <Text as="h2" variant="headingLg">
-                    Automated SEO Blog Generation
-                  </Text>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    Generate SEO-optimized blogs automatically for your store: {shopInfo?.primaryDomain}
-                  </Text>
-                </BlockStack>
-
-                {/* One-Click SEO Blog Generation */}
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingMd">
-                    🚀 One-Click SEO Blog Generation
-                  </Text>
-
-                  <TextField
-                    label="Website URL to analyze (optional)"
-                    value={customUrl}
-                    onChange={setCustomUrl}
-                    placeholder="https://drive-buddy.com/"
-                    helpText="Leave empty to use your shop's domain, or enter a custom URL for testing"
-                    autoComplete="url"
-                  />
-
-                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <Button
-                      variant="primary"
-                      size="large"
-                      onClick={handleGenerateKeywordsAndBlog}
-                      loading={isLoading || isBlogGenerating}
-                    >
-                      {isLoading ? 'Finding Keywords...' :
-                       isBlogGenerating ? 'Creating SEO Blog...' :
-                       keywordData ? '🚀 Generate SEO Blog Post' : '🚀 Generate Keywords & SEO Blog'}
-                    </Button>
-
-                    {keywordData && (
-                      <Button
-                        variant="secondary"
-                        size="large"
-                        onClick={handleRegenerateKeywords}
-                        loading={isLoading && fetcher.formData?.get('actionType') === 'regenerateKeywords'}
-                      >
-                        {isLoading && fetcher.formData?.get('actionType') === 'regenerateKeywords'
-                          ? 'Regenerating Keywords...'
-                          : '🔄 Re-gen Keywords'}
-                      </Button>
-                    )}
-                  </div>
-
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {keywordData ?
-                      'Creates a unique SEO blog post using your existing keywords. Generates new keywords first if needed.' :
-                      'Discovers keywords from your website and creates an SEO-optimized blog post automatically.'}
-                  </Text>
-
-                  {localKeywords && (
-                    <Card background="bg-surface-secondary">
-                      <BlockStack gap="400">
-                        <BlockStack gap="200">
-                          <Text as="h4" variant="headingMd">
-                            ⚙️ Advanced: Edit Keywords (Optional)
-                          </Text>
-                          <Text as="p" variant="bodySm" tone="subdued">
-                            All keywords below will be used to generate comprehensive, SEO-rich blog content
-                          </Text>
-                          {keywordHasChanges && (
-                            <Text as="p" variant="bodySm" tone="subdued">
-                              ⚠️ You have unsaved changes
-                            </Text>
-                          )}
-                        </BlockStack>
-
-                        {/* Headers */}
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: '1fr 1fr 1fr',
-                          gap: '1rem',
-                          paddingBottom: '0.5rem',
-                          borderBottom: '1px solid #e1e5e9'
-                        }}>
-                          <Text variant="headingSm" as="h5">Main Products/Services</Text>
-                          <Text variant="headingSm" as="h5">Problems Solved</Text>
-                          <Text variant="headingSm" as="h5">Customer Searches</Text>
-                        </div>
-
-                        {/* Editable Rows */}
-                        {(() => {
-                          const maxRows = Math.max(
-                            localKeywords.mainProducts?.length || 0,
-                            localKeywords.problemsSolved?.length || 0,
-                            localKeywords.customerSearches?.length || 0,
-                            5 // Minimum 5 rows for adding new keywords
-                          );
-
-                          return Array.from({ length: maxRows }, (_, i) => (
-                            <div key={i} style={{
-                              display: 'grid',
-                              gridTemplateColumns: '1fr 1fr 1fr',
-                              gap: '1rem',
-                              alignItems: 'start'
-                            }}>
-                              <div style={{ position: 'relative' }}>
-                                <TextField
-                                  label=""
-                                  value={localKeywords.mainProducts?.[i] || ''}
-                                  onChange={(value) => updateKeyword('mainProducts', i, value)}
-                                  placeholder="Add keyword..."
-                                  autoComplete="off"
-                                />
-                              </div>
-                              <div style={{ position: 'relative' }}>
-                                <TextField
-                                  label=""
-                                  value={localKeywords.problemsSolved?.[i] || ''}
-                                  onChange={(value) => updateKeyword('problemsSolved', i, value)}
-                                  placeholder="Add keyword..."
-                                  autoComplete="off"
-                                />
-                              </div>
-                              <div style={{ position: 'relative' }}>
-                                <TextField
-                                  label=""
-                                  value={localKeywords.customerSearches?.[i] || ''}
-                                  onChange={(value) => updateKeyword('customerSearches', i, value)}
-                                  placeholder="Add keyword..."
-                                  autoComplete="off"
-                                />
-                              </div>
-                            </div>
-                          ));
-                        })()
-                        }
-
-                        {/* Save Button */}
-                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                          <Button
-                            onClick={saveAllKeywords}
-                            variant="primary"
-                            disabled={!keywordHasChanges}
-                            loading={isLoading && fetcher.formData?.get('actionType') === 'updateKeywords'}
-                          >
-                            {isLoading && fetcher.formData?.get('actionType') === 'updateKeywords'
-                              ? 'Saving...'
-                              : 'Save All Changes'
-                            }
-                          </Button>
-                          {keywordHasChanges && (
-                            <Text as="p" variant="bodySm" tone="subdued">
-                              Remember to save your changes
-                            </Text>
-                          )}
-                        </div>
-
-                      </BlockStack>
-                    </Card>
-                  )}
-                </BlockStack>
-
-                {/* Generated Blog Results */}
-                {generatedBlog && (
-                    <Card background="bg-surface-success">
-                      <BlockStack gap="200">
-                        <Text as="h4" variant="headingMd" tone="success">
-                          SEO Blog Generated Successfully! 🚀
-                        </Text>
-                        <Text as="p" variant="bodyMd">
-                          <strong>{generatedBlog.blog?.title}</strong>
-                        </Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Content Angle: {generatedBlog.blog?.contentAngle} |
-                          Word Count: {generatedBlog.blog?.wordCount} |
-                          Keywords Used: {generatedBlog.blog?.keywordsUsed?.length || 0}
-                        </Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Blog ID: {generatedBlog.blog?.shopifyBlogId}
-                        </Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Article ID: {generatedBlog.blog?.shopifyArticleId}
-                        </Text>
-                        {generatedBlog.blog?.url && (
-                          <Text as="p" variant="bodySm" tone="success">
-                            🎉 Opening blog in new tab in 3 seconds...
-                          </Text>
-                        )}
-                        {generatedBlog.statistics && (
-                          <Text as="p" variant="bodySm" tone="subdued">
-                            Uniqueness: {generatedBlog.statistics.isUnique ? '✅ Unique' : '⚠ Similar content detected'}
-                          </Text>
-                        )}
-                        {generatedBlog.rateLimitRemaining !== undefined && (
-                          <Text as="p" variant="bodySm" tone="subdued">
-                            Rate Limit: {generatedBlog.rateLimitRemaining} blogs remaining this hour
-                          </Text>
-                        )}
-                      </BlockStack>
-                    </Card>
-                  )}
-
-                {/* Step 3: Start Automation */}
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingMd">
-                    Step 3: Start Automation
-                  </Text>
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      const formData = new FormData();
-                      formData.append('actionType', automationSchedule?.enabled ? 'disableAutomation' : 'enableAutomation');
-                      fetcher.submit(formData, { method: 'POST' });
-                    }}
-                    loading={isLoading && (fetcher.formData?.get('actionType') === 'enableAutomation' || fetcher.formData?.get('actionType') === 'disableAutomation')}
-                  >
-                    {automationSchedule?.enabled ? 'Stop Weekly Publishing' : 'Start Weekly Publishing'}
-                  </Button>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Automatically publishes 1 blog per week
-                  </Text>
-                </BlockStack>
-
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
-          </BlockStack>
-        </Layout.Section>
-      </Layout>
+      </BlockStack>
     </Page>
   );
 }
