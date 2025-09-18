@@ -23,6 +23,7 @@ import { ShopifyThemeService } from "../services/shopify-theme.service";
 import { ShopifyShopService } from "../services/shopify-shop.service";
 import { GeminiService } from "../services/gemini.service";
 import { BackupService } from "../services/backup.service";
+import { checkAutomation } from "../services/automation-middleware.service";
 import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -36,6 +37,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const shopService = new ShopifyShopService(admin);
     const geminiService = new GeminiService();
     const backupService = new BackupService(prisma);
+
+    // Get shop info and check automation asynchronously
+    const shopInfo = await shopService.getShopInfo();
+    checkAutomation(shopInfo.primaryDomain || 'unknown', admin);
 
     const aeoService = new AEOService(
       themeService,

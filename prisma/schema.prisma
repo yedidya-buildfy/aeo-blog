@@ -99,3 +99,21 @@ model TopicBatch {
   @@unique([shopDomain, batchNumber])
   @@index([shopDomain])
 }
+
+model AutomationSchedule {
+  id               String    @id @default(cuid())
+  shopDomain       String    @unique
+  enabled          Boolean   @default(false)
+  frequency        String    @default("weekly") // 'weekly' for now
+  targetDayOfWeek  Int       @default(0) // 0 = Sunday, 1 = Monday, etc.
+  targetHourIST    Int       @default(10) // 10 AM Israel time
+  lastGeneratedAt  DateTime?
+  nextTargetDate   DateTime?
+  status           String    @default("idle") // 'idle', 'generating', 'completed', 'error'
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([shopDomain])
+  @@index([enabled])
+  @@index([nextTargetDate])
+}

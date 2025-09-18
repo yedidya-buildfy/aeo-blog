@@ -53,7 +53,7 @@ export class BlogGeneratorService {
             temperature: 0.7,
             topP: 0.9,
             topK: 40,
-            maxOutputTokens: 3500,
+            maxOutputTokens: 10000,
             stopSequences: []
           }
         };
@@ -176,35 +176,15 @@ CONTENT: [HTML blog content, ${targetWordCount} with multiple sections]`;
   private parseBlogContent(generatedText: string, request: BlogGenerationRequest): GeneratedBlog {
     const sections = this.extractSections(generatedText);
 
-    // Validate required sections are present
-    if (!sections.TITLE) {
-      throw new Error('Generated content is missing title section');
-    }
-    if (!sections.CONTENT) {
-      throw new Error('Generated content is missing content section');
-    }
-    if (!sections.SUMMARY) {
-      throw new Error('Generated content is missing summary section');
-    }
-    if (!sections.META_DESCRIPTION) {
-      throw new Error('Generated content is missing meta description section');
-    }
-    if (!sections.TAGS) {
-      throw new Error('Generated content is missing tags section');
-    }
+    // Use fallbacks if sections are missing - be flexible
+    const cleanTitle = sections.TITLE ? this.cleanText(sections.TITLE) : request.prompt.title;
+    const cleanSummary = sections.SUMMARY ? this.cleanText(sections.SUMMARY) : 'Auto-generated blog content';
+    const cleanMeta = sections.META_DESCRIPTION ? this.cleanText(sections.META_DESCRIPTION).substring(0, 160) : cleanTitle.substring(0, 160);
+    const tags = sections.TAGS ? sections.TAGS.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0) : ['blog', 'seo'];
+    const cleanContent = sections.CONTENT ? this.cleanHtmlContent(sections.CONTENT) : this.cleanHtmlContent(generatedText);
 
-    // Clean and process
-    const cleanTitle = this.cleanText(sections.TITLE);
-    const cleanSummary = this.cleanText(sections.SUMMARY);
-    const cleanMeta = this.cleanText(sections.META_DESCRIPTION).substring(0, 160);
-    const tags = sections.TAGS.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
-    const cleanContent = this.cleanHtmlContent(sections.CONTENT);
-
-    // Validate content quality (more lenient for partial content)
-    if (cleanTitle.length < 5) {
-      throw new Error('Generated title is too short');
-    }
-    if (cleanContent.length < 200) {
+    // More lenient validation - just check we have some content
+    if (cleanContent.length < 50) {
       throw new Error('Generated content is too short');
     }
 

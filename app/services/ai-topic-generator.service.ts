@@ -35,7 +35,7 @@ export interface TopicBatch {
 
 export class AITopicGeneratorService {
   private apiKey: string;
-  private baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  private baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent';
 
   constructor(private prisma: PrismaClient) {
     console.log(`[AITopicGenerator] Constructor called with prisma:`, !!prisma);
@@ -119,13 +119,15 @@ export class AITopicGeneratorService {
         temperature: 0.8,
         topP: 0.9,
         topK: 40,
-        maxOutputTokens: 2000,
+        maxOutputTokens: 15000, // Sufficient for 10 topics without being excessive
         stopSequences: []
       }
     };
 
     try {
       console.log(`[AITopicGenerator] Generating topics for shop: ${shopDomain}`);
+      console.log(`[AITopicGenerator] Request config: maxOutputTokens=${requestBody.generationConfig.maxOutputTokens}`);
+      console.log(`[AITopicGenerator] Prompt length: ${requestBody.contents[0].parts[0].text.length} characters`);
 
       const response = await fetch(this.baseUrl, {
         method: 'POST',

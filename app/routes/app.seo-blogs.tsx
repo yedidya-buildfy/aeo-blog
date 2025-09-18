@@ -18,6 +18,8 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { GeminiService } from "../services/gemini.service";
 import { ShopifyShopService } from "../services/shopify-shop.service";
+import { checkAutomation } from "../services/automation-middleware.service";
+import { AutomationSchedulerService } from "../services/automation-scheduler.service";
 import prisma from "../db.server";
 
 // Language-aware fallback keywords function
@@ -74,6 +76,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const shopService = new ShopifyShopService(admin);
     const shopInfo = await shopService.getShopInfo();
 
+    // Check automation asynchronously (non-blocking)
+    checkAutomation(shopInfo.primaryDomain || 'unknown', admin);
+
     // Load existing keywords from database
     let existingKeywords = null;
     try {
@@ -111,10 +116,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // Continue without existing keywords - don't fail the whole loader
     }
 
+    // Load automation schedule
+    let automationSchedule = null;
+    try {
+      const automationService = new AutomationSchedulerService(prisma);
+      automationSchedule = await automationService.getSchedule(shopInfo.primaryDomain || 'unknown');
+    } catch (automationError) {
+      console.error('Failed to load automation schedule:', automationError);
+    }
+
     return json({
       shopInfo,
       existingKeywords,
       recentBlogs: [],
+      automationSchedule,
       error: null
     });
   } catch (error) {
@@ -123,6 +138,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       shopInfo: null,
       existingKeywords: null,
       recentBlogs: [],
+      automationSchedule: null,
       error: 'Failed to load shop information'
     });
   }
@@ -754,6 +770,28 @@ TOTAL KEYWORDS AVAILABLE: ${mainProducts.length + problemsSolved.length + custom
         article: articleData.data?.articleCreate?.article,
         blogContent
       });
+    } else if (actionType === 'enableAutomation') {
+      const shopInfo = await shopService.getShopInfo();
+      const shopDomain = shopInfo.primaryDomain || 'unknown';
+
+      const automationService = new AutomationSchedulerService(prisma);
+      await automationService.enableAutomation(shopDomain, 0, 10); // Sunday, 10 AM
+
+      return json({
+        success: true,
+        message: 'Weekly automation enabled! Blogs will be posted every Sunday at 10 AM Israel time.'
+      });
+    } else if (actionType === 'disableAutomation') {
+      const shopInfo = await shopService.getShopInfo();
+      const shopDomain = shopInfo.primaryDomain || 'unknown';
+
+      const automationService = new AutomationSchedulerService(prisma);
+      await automationService.disableAutomation(shopDomain);
+
+      return json({
+        success: true,
+        message: 'Weekly automation disabled.'
+      });
     }
 
     return json({ success: false, error: 'Invalid action type' }, { status: 400 });
@@ -779,7 +817,7 @@ interface KeywordData {
 }
 
 export default function SEOBlogs() {
-  const { shopInfo, existingKeywords, recentBlogs, error: loaderError } = useLoaderData<typeof loader>();
+  const { shopInfo, existingKeywords, recentBlogs, automationSchedule, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
 
   // Remove toast notifications to fix SSR issues
@@ -1011,6 +1049,76 @@ export default function SEOBlogs() {
                 <Text as="p" variant="bodyMd" tone="subdued">
                   Generate SEO-optimized blogs automatically for your store: {shopInfo?.primaryDomain}
                 </Text>
+              </BlockStack>
+
+              {/* Weekly Automation Controls */}
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd">
+                  🤖 Weekly Automation
+                </Text>
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  Automatically post one SEO blog every Sunday at 10 AM Israel time
+                </Text>
+
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {automationSchedule?.enabled ? (
+                    <>
+                      <Badge tone="success">Automation Enabled</Badge>
+                      <Button
+                        onClick={() => {
+                          const formData = new FormData();
+                          formData.append('actionType', 'disableAutomation');
+                          fetcher.submit(formData, { method: 'POST' });
+                        }}
+                        loading={isLoading && fetcher.formData?.get('actionType') === 'disableAutomation'}
+                      >
+                        Disable Weekly Automation
+                      </Button>
+                      {automationSchedule?.nextTargetDate && (
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Next blog: {new Date(automationSchedule.nextTargetDate).toLocaleDateString('en-IL', {
+                            timeZone: 'Asia/Jerusalem',
+                            weekday: 'long',
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })} IST
+                        </Text>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Badge>Automation Disabled</Badge>
+                      <Button
+                        variant="primary"
+                        onClick={() => {
+                          const formData = new FormData();
+                          formData.append('actionType', 'enableAutomation');
+                          fetcher.submit(formData, { method: 'POST' });
+                        }}
+                        loading={isLoading && fetcher.formData?.get('actionType') === 'enableAutomation'}
+                      >
+                        Enable Weekly Automation
+                      </Button>
+                    </>
+                  )}
+                </div>
+
+                {automationSchedule?.lastGeneratedAt && (
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Last automated blog: {new Date(automationSchedule.lastGeneratedAt).toLocaleDateString('en-IL', {
+                      timeZone: 'Asia/Jerusalem',
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })} IST
+                  </Text>
+                )}
               </BlockStack>
 
               {/* One-Click SEO Blog Generation */}
