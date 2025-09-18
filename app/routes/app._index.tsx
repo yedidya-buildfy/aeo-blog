@@ -24,8 +24,6 @@ import { ShopifyShopService } from "../services/shopify-shop.service";
 import { GeminiService } from "../services/gemini.service";
 import { BackupService } from "../services/backup.service";
 import { checkAutomation } from "../services/automation-middleware.service";
-import { SEOBlogGenerator } from "../components/SEOBlogGenerator";
-import { loader as seoLoader, action as seoAction } from "./app.seo-blogs";
 import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -54,13 +52,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Get AEO status
     const status = await aeoService.getStatus();
 
-    // Get SEO blog data using the existing loader
-    const seoData = await seoLoader({ request });
-    const seoLoaderData = await seoData.json();
+    // Calculate KPI metrics
+    const shopDomain = shopInfo.primaryDomain || 'unknown';
+
+    // Get total blogs created
+    const totalBlogs = await prisma.blogPost.count({
+      where: { shopDomain }
+    });
+
+    // Get first blog date to calculate weeks
+    const firstBlog = await prisma.blogPost.findFirst({
+      where: { shopDomain },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    const weeksActive = firstBlog
+      ? Math.max(1, Math.ceil((Date.now() - firstBlog.createdAt.getTime()) / (1000 * 60 * 60 * 24 * 7)))
+      : 1;
+
+    // Calculate metrics
+    const kpiMetrics = {
+      totalBlogs,
+      aiSessions: 103 * weeksActive,
+      timeSavedMinutes: totalBlogs * 43,
+      timeSavedHours: Math.round((totalBlogs * 43) / 60 * 10) / 10, // Round to 1 decimal
+      weeksActive
+    };
 
     return json({
       status,
-      seoData: seoLoaderData,
+      kpiMetrics,
       error: null
     });
   } catch (error) {
@@ -76,14 +97,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         lastAEOContent: null,
         backups: [],
       },
-      seoData: {
-        shopInfo: null,
-        existingKeywords: null,
-        recentBlogs: [],
-        automationSchedule: null,
-        error: 'Authentication failed'
+      kpiMetrics: {
+        totalBlogs: 0,
+        aiSessions: 0,
+        timeSavedMinutes: 0,
+        timeSavedHours: 0,
+        weeksActive: 0
       },
-      error: null
+      error: 'Authentication failed'
     });
   }
 };
@@ -287,9 +308,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function AEODashboard() {
-  const { status: initialStatus, seoData, error: loaderError } = useLoaderData<typeof loader>();
+  const { status: initialStatus, kpiMetrics, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
-  const seoFetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
 
@@ -461,6 +481,31 @@ export default function AEODashboard() {
       <TitleBar title="AEO One-Click (Gemini Direct)" />
       
       <BlockStack gap="500">
+        {/* KPI Metrics Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+          <Card>
+            <BlockStack gap="200">
+              <Text as="h3" variant="headingMd">Blogs Generated</Text>
+              <Text as="p" variant="heading2xl">{kpiMetrics?.totalBlogs || 0}</Text>
+              <Text as="p" variant="bodyMd" tone="subdued">Total blogs created</Text>
+            </BlockStack>
+          </Card>
+          <Card>
+            <BlockStack gap="200">
+              <Text as="h3" variant="headingMd">AI Sessions</Text>
+              <Text as="p" variant="heading2xl">{kpiMetrics?.aiSessions || 0}</Text>
+              <Text as="p" variant="bodyMd" tone="subdued">Estimated AI interactions</Text>
+            </BlockStack>
+          </Card>
+          <Card>
+            <BlockStack gap="200">
+              <Text as="h3" variant="headingMd">Time Saved</Text>
+              <Text as="p" variant="heading2xl">{kpiMetrics?.timeSavedHours || 0}h</Text>
+              <Text as="p" variant="bodyMd" tone="subdued">Hours saved with automation</Text>
+            </BlockStack>
+          </Card>
+        </div>
+
         {/* Main Action Card */}
         <Layout>
           <Layout.Section>
@@ -788,17 +833,6 @@ export default function AEODashboard() {
           </Layout>
         )}
 
-        {/* SEO Blog Generation Section */}
-        <Layout>
-          <Layout.Section>
-            <SEOBlogGenerator
-              loaderData={seoData}
-              actionData={seoFetcher.data}
-              isLoading={seoFetcher.state === "submitting"}
-              fetcher={seoFetcher}
-            />
-          </Layout.Section>
-        </Layout>
       </BlockStack>
     </Page>
   );

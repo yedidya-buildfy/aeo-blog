@@ -966,7 +966,13 @@ function SEOBlogs() {
       setIsBlogGenerating(true);
       setGeneratedBlog(null);
 
-      const response = await fetch('/api/generate-blog', { method: 'POST' });
+      const response = await fetch('/api/generate-blog', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({})
+      });
       const result = await response.json();
 
       if (result.success) {
@@ -1002,7 +1008,13 @@ function SEOBlogs() {
       setIsBlogGenerating(true);
       setGeneratedBlog(null); // Clear previous result
 
-      const response = await fetch('/api/generate-blog', { method: 'POST' });
+      const response = await fetch('/api/generate-blog', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({})
+      });
       const result = await response.json();
 
       if (result.success) {
@@ -1131,7 +1143,7 @@ function SEOBlogs() {
                     size="large"
                     onClick={handleGenerateKeywordsAndBlog}
                     loading={isLoading || isBlogGenerating}
-                    disabled={billing && !billing.usage?.canGenerateBlog}
+                    disabled={billing ? !billing.usage?.canGenerateBlog : false}
                   >
                     {billing && !billing.usage?.canGenerateBlog
                       ? `Blog Limit Reached (${billing.usage?.blogsGenerated}/${billing.usage?.blogLimit})`
