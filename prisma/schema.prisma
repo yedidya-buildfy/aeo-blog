@@ -58,6 +58,7 @@ model BlogPost {
   keyword          String
   title            String
   status           String
+  url              String?
   createdAt        DateTime  @default(now())
   publishedAt      DateTime?
   contentAngle     String

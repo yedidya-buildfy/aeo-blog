@@ -15,6 +15,8 @@ import {
   Spinner,
   Divider,
   TextField,
+  DataTable,
+  List,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -24,6 +26,7 @@ import { ShopifyShopService } from "../services/shopify-shop.service";
 import { GeminiService } from "../services/gemini.service";
 import { BackupService } from "../services/backup.service";
 import { checkAutomation } from "../services/automation-middleware.service";
+import { AutomationSchedulerService } from "../services/automation-scheduler.service";
 import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -51,12 +54,92 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     // Get status directly
     const status = await aeoService.getStatus();
-    return json({ status, error: null });
+
+    // Load existing keywords from database
+    let existingKeywords = null;
+    try {
+      const keywordAnalysis = await prisma.keywordAnalysis.findFirst({
+        where: {
+          shopDomain: shopInfo.primaryDomain || 'unknown'
+        },
+        orderBy: {
+          updatedAt: 'desc'
+        }
+      });
+
+      if (keywordAnalysis) {
+        // Check if we have categorized keywords, otherwise convert from legacy format
+        if (keywordAnalysis.mainProducts && keywordAnalysis.mainProducts.length > 0) {
+          existingKeywords = {
+            mainProducts: keywordAnalysis.mainProducts,
+            problemsSolved: keywordAnalysis.problemsSolved,
+            customerSearches: keywordAnalysis.customerSearches
+          };
+        } else if (keywordAnalysis.keywords && keywordAnalysis.keywords.length > 0) {
+          // Convert legacy flat keywords to categories (distribute evenly)
+          const totalKeywords = keywordAnalysis.keywords;
+          const thirds = Math.ceil(totalKeywords.length / 3);
+
+          existingKeywords = {
+            mainProducts: totalKeywords.slice(0, thirds),
+            problemsSolved: totalKeywords.slice(thirds, thirds * 2),
+            customerSearches: totalKeywords.slice(thirds * 2)
+          };
+        }
+      }
+    } catch (dbError) {
+      console.error('Failed to load keywords from database:', dbError);
+      // Continue without existing keywords - don't fail the whole loader
+    }
+
+    // Load automation schedule
+    let automationSchedule = null;
+    try {
+      const automationService = new AutomationSchedulerService(prisma);
+      automationSchedule = await automationService.getSchedule(shopInfo.primaryDomain || 'unknown');
+    } catch (automationError) {
+      console.error('Failed to load automation schedule:', automationError);
+    }
+
+    // Load recent blog posts
+    let recentBlogs = [];
+    try {
+      recentBlogs = await prisma.blogPost.findMany({
+        where: {
+          shopDomain: shopInfo.primaryDomain || 'unknown'
+        },
+        orderBy: {
+          createdAt: 'desc'
+        },
+        take: 10, // Last 10 blogs
+        select: {
+          id: true,
+          title: true,
+          url: true,
+          status: true,
+          createdAt: true,
+          publishedAt: true,
+          primaryTopic: true,
+          contentAngle: true
+        }
+      });
+    } catch (blogError) {
+      console.error('Failed to load blog posts:', blogError);
+    }
+
+    return json({
+      status,
+      shopInfo,
+      existingKeywords,
+      automationSchedule,
+      recentBlogs,
+      error: null
+    });
   } catch (error) {
     console.error('Error in loader:', error);
-    
+
     // Return default state for authentication issues
-    return json({ 
+    return json({
       status: {
         shopDomain: 'Authenticating...',
         homepageUrl: '',
@@ -64,8 +147,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         currentLlms: null,
         lastAEOContent: null,
         backups: [],
-      }, 
-      error: null 
+      },
+      shopInfo: null,
+      existingKeywords: null,
+      automationSchedule: null,
+      recentBlogs: [],
+      error: null
     });
   }
 };
@@ -73,7 +160,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const actionType = formData.get('actionType');
-  
+  const selectedKeyword = formData.get('keyword');
+  const customUrl = formData.get('customUrl');
+
   try {
     const { admin } = await authenticate.admin(request);
 
@@ -245,6 +334,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       console.log(`Successfully updated ${fileType}.txt in both database and theme`);
       return json({ success: true, message: `${fileType}.txt updated successfully` });
+    } else if (actionType === 'enableAutomation') {
+      const shopInfo = await shopService.getShopInfo();
+      const shopDomain = shopInfo.primaryDomain || 'unknown';
+
+      const automationService = new AutomationSchedulerService(prisma);
+      await automationService.enableAutomation(shopDomain, 0, 10); // Sunday, 10 AM
+
+      return json({
+        success: true,
+        message: 'Weekly automation enabled! Blogs will be posted every Sunday at 10 AM Israel time.'
+      });
+    } else if (actionType === 'disableAutomation') {
+      const shopInfo = await shopService.getShopInfo();
+      const shopDomain = shopInfo.primaryDomain || 'unknown';
+
+      const automationService = new AutomationSchedulerService(prisma);
+      await automationService.disableAutomation(shopDomain);
+
+      return json({
+        success: true,
+        message: 'Weekly automation disabled.'
+      });
     } else {
       return json({ success: false, error: 'Invalid action type' }, { status: 400 });
     }
@@ -262,18 +373,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 };
 
+interface KeywordData {
+  mainProducts: string[];
+  problemsSolved: string[];
+  customerSearches: string[];
+}
+
 export default function AEODashboard() {
-  const { status: initialStatus, error: loaderError } = useLoaderData<typeof loader>();
+  const { status: initialStatus, shopInfo, existingKeywords, automationSchedule, recentBlogs, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
-  
+
   const [status, setStatus] = useState(initialStatus);
   const [selectedFile, setSelectedFile] = useState<'robots' | 'llms' | null>(null);
   const [editMode, setEditMode] = useState<'robots' | 'llms' | null>(null);
   const [editContent, setEditContent] = useState<string>('');
   const [hasChanges, setHasChanges] = useState(false);
   const fileContentRef = useRef<HTMLDivElement>(null);
+
+  // SEO Blog Generation state
+  const [keywordData, setKeywordData] = useState<KeywordData | null>(existingKeywords);
+  const [generatedBlog, setGeneratedBlog] = useState<any>(null);
+  const [customUrl, setCustomUrl] = useState<string>('https://drive-buddy.com/');
+  const [isBlogGenerating, setIsBlogGenerating] = useState<boolean>(false);
+
+  // Local state for editable keywords
+  const [localKeywords, setLocalKeywords] = useState<KeywordData>(keywordData || {
+    mainProducts: [],
+    problemsSolved: [],
+    customerSearches: []
+  });
+  const [keywordHasChanges, setKeywordHasChanges] = useState(false);
   
   const isLoading = fetcher.state === "submitting";
   const actionData = fetcher.data;
@@ -348,6 +479,137 @@ export default function AEODashboard() {
     setEditMode(null);
     setEditContent('');
     setHasChanges(false);
+  };
+
+  // SEO Blog Generation Functions
+  // Update local keywords when new data is fetched
+  useEffect(() => {
+    if (keywordData) {
+      setLocalKeywords(keywordData);
+      setKeywordHasChanges(false);
+    }
+  }, [keywordData]);
+
+  // Keyword editing functions
+  const updateKeyword = (category: keyof KeywordData, index: number, value: string) => {
+    const updated = { ...localKeywords };
+
+    if (value.trim()) {
+      // Ensure array exists and has enough slots
+      if (!updated[category]) updated[category] = [];
+      updated[category][index] = value.trim();
+    } else {
+      // Remove empty values
+      if (updated[category] && updated[category][index] !== undefined) {
+        updated[category].splice(index, 1);
+      }
+    }
+
+    setLocalKeywords(updated);
+    setKeywordHasChanges(true);
+  };
+
+  const saveAllKeywords = () => {
+    fetcher.submit({
+      actionType: 'updateKeywords',
+      keywordData: JSON.stringify(localKeywords)
+    }, { method: 'POST' });
+    setKeywordHasChanges(false);
+  };
+
+  const handleGenerateIntelligentBlog = async () => {
+    try {
+      setIsBlogGenerating(true);
+      setGeneratedBlog(null); // Clear previous result
+
+      const response = await fetch('/api/generate-blog', { method: 'POST' });
+      const result = await response.json();
+
+      if (result.success) {
+        setGeneratedBlog(result);
+        shopify.toast.show("Intelligent blog generated successfully!");
+
+        // Redirect to the created blog after 3 seconds
+        if (result.blog?.url) {
+          setTimeout(() => {
+            window.open(result.blog.url, '_blank');
+          }, 3000);
+        }
+      } else {
+        let errorMessage = result.error || "Failed to generate blog";
+
+        // Handle specific error types with user-friendly messages
+        if (result.needsKeywords) {
+          errorMessage = "Please generate keywords first using the 'Find Keywords' button above.";
+        } else if (result.rateLimitExceeded) {
+          errorMessage = "Rate limit exceeded. You can generate up to 5 blogs per hour.";
+        } else if (result.retryable) {
+          errorMessage += " Please try again in a few minutes.";
+        }
+
+        shopify.toast.show(errorMessage, { isError: true });
+      }
+    } catch (error) {
+      shopify.toast.show("Network error. Please check your connection and try again.", { isError: true });
+    } finally {
+      setIsBlogGenerating(false);
+    }
+  };
+
+  const handleGenerateKeywordsAndBlog = async () => {
+    try {
+      // Step 1: Generate keywords if we don't have them
+      if (!keywordData || keywordData.mainProducts.length === 0) {
+        const formData = new FormData();
+        formData.append('actionType', 'findKeywords');
+        if (customUrl) {
+          formData.append('customUrl', customUrl);
+        }
+        fetcher.submit(formData, { method: 'POST' });
+
+        // Wait for keywords to be generated before proceeding to blog
+        return;
+      }
+
+      // Step 2: Generate blog if we already have keywords
+      setIsBlogGenerating(true);
+      setGeneratedBlog(null);
+
+      const response = await fetch('/api/generate-blog', { method: 'POST' });
+      const result = await response.json();
+
+      if (result.success) {
+        setGeneratedBlog(result);
+        shopify.toast.show("SEO blog generated successfully!");
+
+        if (result.blog?.url) {
+          setTimeout(() => {
+            window.open(result.blog.url, '_blank');
+          }, 3000);
+        }
+      } else {
+        let errorMessage = result.error || "Failed to generate blog";
+        if (result.needsKeywords) {
+          errorMessage = "Please generate keywords first using the 'Generate SEO Blog' button above.";
+        } else if (result.rateLimitExceeded) {
+          errorMessage = "Rate limit exceeded. You can generate up to 5 blogs per hour.";
+        } else if (result.retryable) {
+          errorMessage += " Please try again in a few minutes.";
+        }
+        shopify.toast.show(errorMessage, { isError: true });
+      }
+    } catch (error) {
+      shopify.toast.show("Network error. Please check your connection and try again.", { isError: true });
+    } finally {
+      setIsBlogGenerating(false);
+    }
+  };
+
+  const handleRegenerateKeywords = () => {
+    fetcher.submit({
+      actionType: 'regenerateKeywords',
+      customUrl: customUrl || ''
+    }, { method: 'POST' });
   };
 
   // Handle clicks outside the file content area
@@ -434,18 +696,69 @@ export default function AEODashboard() {
   return (
     <Page>
       <TitleBar title="AEO One-Click (Gemini Direct)" />
-      
-      <BlockStack gap="500">
-        {/* Main Action Card */}
-        <Layout>
-          <Layout.Section>
-            <div style={{ display: 'flex', height: '100%' }}>
-              <Card>
-              <BlockStack gap="400">
+
+      <Layout>
+        {/* Blog Posts Sidebar - Left Column */}
+        <Layout.Section variant="oneThird">
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h3" variant="headingMd">
+                📝 Your Generated Blogs
+              </Text>
+
+              {recentBlogs.length > 0 ? (
                 <BlockStack gap="200">
-                  <Text as="h2" variant="headingLg">
-                    AI Engine Optimization
-                  </Text>
+                  {recentBlogs.map((blog: any) => (
+                    <Card key={blog.id} background="bg-surface-secondary">
+                      <BlockStack gap="200">
+                        <Text as="h4" variant="headingSm">
+                          {blog.title}
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {blog.primaryTopic}
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {new Date(blog.createdAt).toLocaleDateString()}
+                        </Text>
+                        <InlineStack gap="200">
+                          <Badge tone={blog.status === 'published' ? 'success' : 'info'}>
+                            {blog.status}
+                          </Badge>
+                          {blog.url && (
+                            <Button
+                              size="slim"
+                              variant="plain"
+                              onClick={() => window.open(blog.url, '_blank')}
+                            >
+                              View
+                            </Button>
+                          )}
+                        </InlineStack>
+                      </BlockStack>
+                    </Card>
+                  ))}
+                </BlockStack>
+              ) : (
+                <Text as="p" variant="bodyMd" tone="subdued" alignment="center">
+                  No blogs created yet. Generate your first SEO blog!
+                </Text>
+              )}
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        {/* Main Content - Right Column */}
+        <Layout.Section>
+          <BlockStack gap="500">
+            {/* Main Action Card */}
+            <Layout>
+              <Layout.Section>
+                <Card>
+                  <BlockStack gap="400">
+                    <BlockStack gap="200">
+                      <Text as="h2" variant="headingLg">
+                        AI Engine Optimization
+                      </Text>
                   <Text as="p" variant="bodyMd" tone="subdued">
                     One-click AEO optimization for your store. This will generate robots.txt and llms.txt files using Gemini AI and automatically apply them to your theme.
                   </Text>
@@ -500,14 +813,12 @@ export default function AEODashboard() {
                   </InlineStack>
                 </BlockStack>
               </BlockStack>
-            </Card>
-            </div>
-          </Layout.Section>
+                </Card>
+              </Layout.Section>
 
-          {/* Status Info Sidebar */}
-          <Layout.Section variant="oneThird">
-            <div style={{ display: 'flex', height: '100%' }}>
-              <Card>
+              {/* Status Info Sidebar */}
+              <Layout.Section variant="oneThird">
+                <Card>
                 <BlockStack gap="400" align="space-between" inlineAlign="stretch">
                   <BlockStack gap="400">
                     <Text as="h3" variant="headingMd">
@@ -551,11 +862,15 @@ export default function AEODashboard() {
                     </BlockStack>
                   </BlockStack>
                 </BlockStack>
-              </Card>
-            </div>
-          </Layout.Section>
-        </Layout>
+                </Card>
+              </Layout.Section>
+            </Layout>
+          </BlockStack>
+        </Layout.Section>
 
+      </Layout>
+
+      <BlockStack gap="500">
         {/* Applied Files Section */}
         {actionData && actionData.success && actionData.generatedRobots && actionData.generatedLlms && fetcher.formData?.get('actionType') === 'improve' && (
           <Layout>
@@ -762,7 +1077,239 @@ export default function AEODashboard() {
             </Layout.Section>
           </Layout>
         )}
-      </BlockStack>
+
+        {/* SEO Blog Generation Card */}
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <BlockStack gap="200">
+                  <Text as="h2" variant="headingLg">
+                    Automated SEO Blog Generation
+                  </Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    Generate SEO-optimized blogs automatically for your store: {shopInfo?.primaryDomain}
+                  </Text>
+                </BlockStack>
+
+                {/* One-Click SEO Blog Generation */}
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingMd">
+                    🚀 One-Click SEO Blog Generation
+                  </Text>
+
+                  <TextField
+                    label="Website URL to analyze (optional)"
+                    value={customUrl}
+                    onChange={setCustomUrl}
+                    placeholder="https://drive-buddy.com/"
+                    helpText="Leave empty to use your shop's domain, or enter a custom URL for testing"
+                    autoComplete="url"
+                  />
+
+                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Button
+                      variant="primary"
+                      size="large"
+                      onClick={handleGenerateKeywordsAndBlog}
+                      loading={isLoading || isBlogGenerating}
+                    >
+                      {isLoading ? 'Finding Keywords...' :
+                       isBlogGenerating ? 'Creating SEO Blog...' :
+                       keywordData ? '🚀 Generate SEO Blog Post' : '🚀 Generate Keywords & SEO Blog'}
+                    </Button>
+
+                    {keywordData && (
+                      <Button
+                        variant="secondary"
+                        size="large"
+                        onClick={handleRegenerateKeywords}
+                        loading={isLoading && fetcher.formData?.get('actionType') === 'regenerateKeywords'}
+                      >
+                        {isLoading && fetcher.formData?.get('actionType') === 'regenerateKeywords'
+                          ? 'Regenerating Keywords...'
+                          : '🔄 Re-gen Keywords'}
+                      </Button>
+                    )}
+                  </div>
+
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {keywordData ?
+                      'Creates a unique SEO blog post using your existing keywords. Generates new keywords first if needed.' :
+                      'Discovers keywords from your website and creates an SEO-optimized blog post automatically.'}
+                  </Text>
+
+                  {localKeywords && (
+                    <Card background="bg-surface-secondary">
+                      <BlockStack gap="400">
+                        <BlockStack gap="200">
+                          <Text as="h4" variant="headingMd">
+                            ⚙️ Advanced: Edit Keywords (Optional)
+                          </Text>
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            All keywords below will be used to generate comprehensive, SEO-rich blog content
+                          </Text>
+                          {keywordHasChanges && (
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              ⚠️ You have unsaved changes
+                            </Text>
+                          )}
+                        </BlockStack>
+
+                        {/* Headers */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 1fr 1fr',
+                          gap: '1rem',
+                          paddingBottom: '0.5rem',
+                          borderBottom: '1px solid #e1e5e9'
+                        }}>
+                          <Text variant="headingSm" as="h5">Main Products/Services</Text>
+                          <Text variant="headingSm" as="h5">Problems Solved</Text>
+                          <Text variant="headingSm" as="h5">Customer Searches</Text>
+                        </div>
+
+                        {/* Editable Rows */}
+                        {(() => {
+                          const maxRows = Math.max(
+                            localKeywords.mainProducts?.length || 0,
+                            localKeywords.problemsSolved?.length || 0,
+                            localKeywords.customerSearches?.length || 0,
+                            5 // Minimum 5 rows for adding new keywords
+                          );
+
+                          return Array.from({ length: maxRows }, (_, i) => (
+                            <div key={i} style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1fr 1fr 1fr',
+                              gap: '1rem',
+                              alignItems: 'start'
+                            }}>
+                              <div style={{ position: 'relative' }}>
+                                <TextField
+                                  label=""
+                                  value={localKeywords.mainProducts?.[i] || ''}
+                                  onChange={(value) => updateKeyword('mainProducts', i, value)}
+                                  placeholder="Add keyword..."
+                                  autoComplete="off"
+                                />
+                              </div>
+                              <div style={{ position: 'relative' }}>
+                                <TextField
+                                  label=""
+                                  value={localKeywords.problemsSolved?.[i] || ''}
+                                  onChange={(value) => updateKeyword('problemsSolved', i, value)}
+                                  placeholder="Add keyword..."
+                                  autoComplete="off"
+                                />
+                              </div>
+                              <div style={{ position: 'relative' }}>
+                                <TextField
+                                  label=""
+                                  value={localKeywords.customerSearches?.[i] || ''}
+                                  onChange={(value) => updateKeyword('customerSearches', i, value)}
+                                  placeholder="Add keyword..."
+                                  autoComplete="off"
+                                />
+                              </div>
+                            </div>
+                          ));
+                        })()
+                        }
+
+                        {/* Save Button */}
+                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                          <Button
+                            onClick={saveAllKeywords}
+                            variant="primary"
+                            disabled={!keywordHasChanges}
+                            loading={isLoading && fetcher.formData?.get('actionType') === 'updateKeywords'}
+                          >
+                            {isLoading && fetcher.formData?.get('actionType') === 'updateKeywords'
+                              ? 'Saving...'
+                              : 'Save All Changes'
+                            }
+                          </Button>
+                          {keywordHasChanges && (
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              Remember to save your changes
+                            </Text>
+                          )}
+                        </div>
+
+                      </BlockStack>
+                    </Card>
+                  )}
+                </BlockStack>
+
+                {/* Generated Blog Results */}
+                {generatedBlog && (
+                    <Card background="bg-surface-success">
+                      <BlockStack gap="200">
+                        <Text as="h4" variant="headingMd" tone="success">
+                          SEO Blog Generated Successfully! 🚀
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          <strong>{generatedBlog.blog?.title}</strong>
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Content Angle: {generatedBlog.blog?.contentAngle} |
+                          Word Count: {generatedBlog.blog?.wordCount} |
+                          Keywords Used: {generatedBlog.blog?.keywordsUsed?.length || 0}
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Blog ID: {generatedBlog.blog?.shopifyBlogId}
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Article ID: {generatedBlog.blog?.shopifyArticleId}
+                        </Text>
+                        {generatedBlog.blog?.url && (
+                          <Text as="p" variant="bodySm" tone="success">
+                            🎉 Opening blog in new tab in 3 seconds...
+                          </Text>
+                        )}
+                        {generatedBlog.statistics && (
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            Uniqueness: {generatedBlog.statistics.isUnique ? '✅ Unique' : '⚠ Similar content detected'}
+                          </Text>
+                        )}
+                        {generatedBlog.rateLimitRemaining !== undefined && (
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            Rate Limit: {generatedBlog.rateLimitRemaining} blogs remaining this hour
+                          </Text>
+                        )}
+                      </BlockStack>
+                    </Card>
+                  )}
+
+                {/* Step 3: Start Automation */}
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingMd">
+                    Step 3: Start Automation
+                  </Text>
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      const formData = new FormData();
+                      formData.append('actionType', automationSchedule?.enabled ? 'disableAutomation' : 'enableAutomation');
+                      fetcher.submit(formData, { method: 'POST' });
+                    }}
+                    loading={isLoading && (fetcher.formData?.get('actionType') === 'enableAutomation' || fetcher.formData?.get('actionType') === 'disableAutomation')}
+                  >
+                    {automationSchedule?.enabled ? 'Stop Weekly Publishing' : 'Start Weekly Publishing'}
+                  </Button>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Automatically publishes 1 blog per week
+                  </Text>
+                </BlockStack>
+
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+          </BlockStack>
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 }

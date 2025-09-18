@@ -106,7 +106,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`[GenerateBlog] Published to Shopify: ${publishResult.article?.id}`);
 
-    // Step 7: Save to database for tracking
+    // Step 7: Construct blog URL
+    const blogUrl = `https://${shopDomain}/blogs/seo-blog/${generatedBlog.handle}`;
+
+    // Step 8: Save to database for tracking
     const blogRecord = await prisma.blogPost.create({
       data: {
         shopDomain,
@@ -116,6 +119,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         title: generatedBlog.title,
         handle: generatedBlog.handle,
         status: 'published',
+        url: blogUrl,
         primaryTopic: blogPrompt.primaryTopic,
         keywordsFocused: blogPrompt.keywordsFocused,
         contentHash: blogPrompt.contentHash,
@@ -133,7 +137,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         id: blogRecord.id,
         title: generatedBlog.title,
         handle: generatedBlog.handle,
-        url: publishResult.article?.url,
+        url: blogUrl,
         shopifyBlogId: publishResult.blog!.id,
         shopifyArticleId: publishResult.article!.id,
         contentAngle: blogPrompt.contentAngle,

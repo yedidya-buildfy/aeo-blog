@@ -183,6 +183,9 @@ export class AutomationSchedulerService {
         };
       }
 
+      // Construct blog URL
+      const blogUrl = `https://${shopDomain}/blogs/seo-blog/${generatedBlog.handle}`;
+
       // Save to database
       const blogRecord = await this.prisma.blogPost.create({
         data: {
@@ -193,6 +196,7 @@ export class AutomationSchedulerService {
           title: generatedBlog.title,
           handle: generatedBlog.handle,
           status: 'published',
+          url: blogUrl,
           primaryTopic: blogPrompt.primaryTopic,
           keywordsFocused: blogPrompt.keywordsFocused,
           contentHash: blogPrompt.contentHash,
