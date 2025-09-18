@@ -24,6 +24,8 @@ import { ShopifyShopService } from "../services/shopify-shop.service";
 import { GeminiService } from "../services/gemini.service";
 import { BackupService } from "../services/backup.service";
 import { checkAutomation } from "../services/automation-middleware.service";
+import { SEOBlogGenerator } from "../components/SEOBlogGenerator";
+import { loader as seoLoader, action as seoAction } from "./app.seo-blogs";
 import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -49,14 +51,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       backupService
     );
 
-    // Get status directly
+    // Get AEO status
     const status = await aeoService.getStatus();
-    return json({ status, error: null });
+
+    // Get SEO blog data using the existing loader
+    const seoData = await seoLoader({ request });
+    const seoLoaderData = await seoData.json();
+
+    return json({
+      status,
+      seoData: seoLoaderData,
+      error: null
+    });
   } catch (error) {
     console.error('Error in loader:', error);
-    
+
     // Return default state for authentication issues
-    return json({ 
+    return json({
       status: {
         shopDomain: 'Authenticating...',
         homepageUrl: '',
@@ -64,8 +75,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         currentLlms: null,
         lastAEOContent: null,
         backups: [],
-      }, 
-      error: null 
+      },
+      seoData: {
+        shopInfo: null,
+        existingKeywords: null,
+        recentBlogs: [],
+        automationSchedule: null,
+        error: 'Authentication failed'
+      },
+      error: null
     });
   }
 };
@@ -73,7 +91,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const actionType = formData.get('actionType');
-  
+
+  // Route SEO blog actions to the existing SEO action handler
+  const seoActions = ['findKeywords', 'regenerateKeywords', 'createBlog', 'updateKeywords', 'enableAutomation', 'disableAutomation'];
+  if (seoActions.includes(actionType as string)) {
+    return await seoAction({ request });
+  }
+
   try {
     const { admin } = await authenticate.admin(request);
 
@@ -263,11 +287,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function AEODashboard() {
-  const { status: initialStatus, error: loaderError } = useLoaderData<typeof loader>();
+  const { status: initialStatus, seoData, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  const seoFetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
-  
+
   const [status, setStatus] = useState(initialStatus);
   const [selectedFile, setSelectedFile] = useState<'robots' | 'llms' | null>(null);
   const [editMode, setEditMode] = useState<'robots' | 'llms' | null>(null);
@@ -557,7 +582,7 @@ export default function AEODashboard() {
         </Layout>
 
         {/* Applied Files Section */}
-        {actionData && actionData.success && actionData.generatedRobots && actionData.generatedLlms && fetcher.formData?.get('actionType') === 'improve' && (
+        {actionData && actionData.success && 'generatedRobots' in actionData && 'generatedLlms' in actionData && fetcher.formData?.get('actionType') === 'improve' && (
           <Layout>
             <Layout.Section>
               <Card>
@@ -566,7 +591,7 @@ export default function AEODashboard() {
                     Applied AEO Files
                   </Text>
                   <Text as="p" variant="bodyMd" tone="success">
-                    Files successfully applied to your theme for: {actionData.homepageUrl}
+                    Files successfully applied to your theme for: {'homepageUrl' in actionData ? actionData.homepageUrl : 'your store'}
                   </Text>
                   
                   <Divider />
@@ -579,12 +604,12 @@ export default function AEODashboard() {
                       </Text>
                       <Card background="bg-surface-secondary">
                         <pre style={{ 
-                          whiteSpace: 'pre-wrap', 
-                          margin: 0, 
+                          whiteSpace: 'pre-wrap',
+                          margin: 0,
                           fontSize: '12px',
                           fontFamily: 'Monaco, "Lucida Console", monospace'
                         }}>
-                          {actionData.generatedRobots}
+                          {'generatedRobots' in actionData ? actionData.generatedRobots : ''}
                         </pre>
                       </Card>
                     </BlockStack>
@@ -596,12 +621,12 @@ export default function AEODashboard() {
                       </Text>
                       <Card background="bg-surface-secondary">
                         <pre style={{ 
-                          whiteSpace: 'pre-wrap', 
-                          margin: 0, 
+                          whiteSpace: 'pre-wrap',
+                          margin: 0,
                           fontSize: '12px',
                           fontFamily: 'Monaco, "Lucida Console", monospace'
                         }}>
-                          {actionData.generatedLlms}
+                          {'generatedLlms' in actionData ? actionData.generatedLlms : ''}
                         </pre>
                       </Card>
                     </BlockStack>
@@ -762,6 +787,18 @@ export default function AEODashboard() {
             </Layout.Section>
           </Layout>
         )}
+
+        {/* SEO Blog Generation Section */}
+        <Layout>
+          <Layout.Section>
+            <SEOBlogGenerator
+              loaderData={seoData}
+              actionData={seoFetcher.data}
+              isLoading={seoFetcher.state === "submitting"}
+              fetcher={seoFetcher}
+            />
+          </Layout.Section>
+        </Layout>
       </BlockStack>
     </Page>
   );

@@ -816,7 +816,7 @@ interface KeywordData {
   customerSearches: string[];
 }
 
-export default function SEOBlogs() {
+function SEOBlogs() {
   const { shopInfo, existingKeywords, recentBlogs, automationSchedule, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
 
@@ -1269,3 +1269,7 @@ export default function SEOBlogs() {
     </Page>
   );
 }
+
+// Export both as default (for route) and named (for component usage)
+export default SEOBlogs;
+export { SEOBlogs as SEOBlogsComponent };
