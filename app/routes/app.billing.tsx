@@ -261,8 +261,8 @@ function Billing() {
                   <Text as="p" variant="bodyMd">
                     Auto LLMs.txt Generation
                   </Text>
-                  <Text as="p" variant="bodySm" tone={usage.canGenerateLlms ? "success" : "subdued"}>
-                    {usage.canGenerateLlms ? "✅ Enabled (Pro plan feature)" : "❌ Not available (Pro plan only)"}
+                  <Text as="p" variant="bodySm" tone="success">
+                    ✅ Available (1-time generation for Free & Starter, auto-generation for Pro)
                   </Text>
                 </BlockStack>
               </BlockStack>
@@ -276,7 +276,7 @@ function Billing() {
                 Available Plans
               </Text>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem' }}>
                 {Object.entries(allPlans).map(([planKey, planConfig]) => {
                   const plan = planKey as PlanType;
                   const isCurrentPlan = plan === currentPlan;
@@ -284,56 +284,87 @@ function Billing() {
 
                   return (
                     <Card key={plan} background={isCurrentPlan ? "bg-surface-selected" : undefined}>
-                      <BlockStack gap="300">
-                        <InlineStack align="space-between">
-                          <Text as="h3" variant="headingMd">
-                            {planConfig.name}
-                          </Text>
-                          {isCurrentPlan && (
-                            <Badge tone="info">Current</Badge>
-                          )}
-                        </InlineStack>
-
-                        <Text as="p" variant="headingLg">
-                          {plan === 'free' ? 'Free' : `$${planConfig.price}/month`}
-                        </Text>
-
-                        <List type="bullet">
-                          {planConfig.features.map((feature, index) => (
-                            <List.Item key={index}>{feature}</List.Item>
-                          ))}
-                        </List>
-
-                        <Box paddingBlockStart="300">
-                          {isCurrentPlan ? (
-                            <InlineStack gap="200">
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                This is your current plan
+                      <div style={{ padding: '1.5rem' }}>
+                        <BlockStack gap="400">
+                          <div>
+                            <InlineStack align="space-between" blockAlign="start">
+                              <Text as="h3" variant="headingLg" fontWeight="medium">
+                                {planConfig.name}
                               </Text>
-                              {isPaidPlan && (
-                                <Button
-                                  variant="plain"
-                                  tone="critical"
-                                  onClick={handleCancel}
-                                  loading={isLoading}
-                                >
-                                  Cancel Subscription
-                                </Button>
+                              {isCurrentPlan && (
+                                <Badge tone="info">Current Plan</Badge>
                               )}
                             </InlineStack>
-                          ) : (
-                            <Button
-                              variant={plan === 'pro' ? 'primary' : 'secondary'}
-                              fullWidth
-                              onClick={() => handleSubscribe(plan)}
-                              loading={isLoading}
-                              disabled={plan === 'free'}
-                            >
-                              {plan === 'free' ? 'Free Plan' : `Upgrade to ${planConfig.name}`}
-                            </Button>
+
+                            <div style={{ marginTop: '0.5rem' }}>
+                              <Text as="p" variant="bodyMd" tone="subdued">
+                                {plan === 'free' ? 'To try the software on one product' :
+                                 plan === 'starter' ? 'For CRO optimization for a small store or of several products' :
+                                 'For CRO optimization for large stores with many products'}
+                              </Text>
+                            </div>
+                          </div>
+
+                          <div>
+                            <Text as="p" variant="bodyMd" tone="subdued">Price</Text>
+                            <Text as="p" variant="heading2xl" fontWeight="bold">
+                              {plan === 'free' ? 'FREE' : `$${planConfig.price} USD/month`}
+                            </Text>
+                            {plan !== 'free' && (
+                              <Text as="p" variant="bodyMd" tone="subdued">Per Month</Text>
+                            )}
+                          </div>
+
+                          <div>
+                            {isCurrentPlan ? (
+                              <Button
+                                variant="secondary"
+                                fullWidth
+                                disabled
+                              >
+                                Current Plan
+                              </Button>
+                            ) : (
+                              <Button
+                                variant={plan === 'pro' ? 'primary' : 'secondary'}
+                                fullWidth
+                                onClick={() => handleSubscribe(plan)}
+                                loading={isLoading}
+                                disabled={plan === 'free'}
+                              >
+                                {plan === 'free' ? 'Free Plan' : 'Upgrade'}
+                              </Button>
+                            )}
+                          </div>
+
+                          <div>
+                            <Text as="p" variant="bodyMd" fontWeight="medium">Includes</Text>
+                            <div style={{ marginTop: '0.5rem' }}>
+                              <BlockStack gap="100">
+                                {planConfig.features.map((feature, index) => (
+                                  <div key={index} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                                    <Text as="span" variant="bodyMd" style={{ lineHeight: '1.5', minWidth: '1rem' }}>✓</Text>
+                                    <Text as="p" variant="bodyMd" style={{ lineHeight: '1.5', flex: 1 }}>{feature}</Text>
+                                  </div>
+                                ))}
+                              </BlockStack>
+                            </div>
+                          </div>
+
+                          {isCurrentPlan && isPaidPlan && (
+                            <div style={{ borderTop: '1px solid #e1e1e1', paddingTop: '1rem' }}>
+                              <Button
+                                variant="plain"
+                                tone="critical"
+                                onClick={handleCancel}
+                                loading={isLoading}
+                              >
+                                Cancel Subscription
+                              </Button>
+                            </div>
                           )}
-                        </Box>
-                      </BlockStack>
+                        </BlockStack>
+                      </div>
                     </Card>
                   );
                 })}

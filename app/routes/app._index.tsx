@@ -484,25 +484,31 @@ export default function AEODashboard() {
         {/* KPI Metrics Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
           <Card>
-            <BlockStack gap="200">
-              <Text as="h3" variant="headingMd">Blogs Generated</Text>
-              <Text as="p" variant="heading2xl">{kpiMetrics?.totalBlogs || 0}</Text>
+            <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+              <Text as="h3" variant="headingMd" fontWeight="medium">Blogs Generated</Text>
+              <div style={{ margin: '1rem 0' }}>
+                <Text as="p" variant="heading3xl" fontWeight="bold">{kpiMetrics?.totalBlogs || 0}</Text>
+              </div>
               <Text as="p" variant="bodyMd" tone="subdued">Total blogs created</Text>
-            </BlockStack>
+            </div>
           </Card>
           <Card>
-            <BlockStack gap="200">
-              <Text as="h3" variant="headingMd">AI Sessions</Text>
-              <Text as="p" variant="heading2xl">{kpiMetrics?.aiSessions || 0}</Text>
+            <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+              <Text as="h3" variant="headingMd" fontWeight="medium">AI Sessions</Text>
+              <div style={{ margin: '1rem 0' }}>
+                <Text as="p" variant="heading3xl" fontWeight="bold">{kpiMetrics?.aiSessions || 0}</Text>
+              </div>
               <Text as="p" variant="bodyMd" tone="subdued">Estimated AI interactions</Text>
-            </BlockStack>
+            </div>
           </Card>
           <Card>
-            <BlockStack gap="200">
-              <Text as="h3" variant="headingMd">Time Saved</Text>
-              <Text as="p" variant="heading2xl">{kpiMetrics?.timeSavedHours || 0}h</Text>
+            <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+              <Text as="h3" variant="headingMd" fontWeight="medium">Time Saved</Text>
+              <div style={{ margin: '1rem 0' }}>
+                <Text as="p" variant="heading3xl" fontWeight="bold">{kpiMetrics?.timeSavedHours || 0}h</Text>
+              </div>
               <Text as="p" variant="bodyMd" tone="subdued">Hours saved with automation</Text>
-            </BlockStack>
+            </div>
           </Card>
         </div>
 

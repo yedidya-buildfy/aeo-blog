@@ -34,14 +34,14 @@ export class BillingService {
       price: 0,
       blogLimit: 1,
       autoLlms: false,
-      features: ['1 blog per week', 'Manual keyword generation', 'Basic SEO optimization']
+      features: ['1 blog per week', 'Manual keyword generation', 'Basic SEO optimization', '1-time LLMs.txt generation']
     },
     starter: {
       name: 'Starter Plan',
       price: 4.99,
       blogLimit: 2,
       autoLlms: false,
-      features: ['2 blogs per week', 'Automated keyword generation', 'Enhanced SEO optimization']
+      features: ['2 blogs per week', 'Automated keyword generation', 'Enhanced SEO optimization', '1-time LLMs.txt generation']
     },
     pro: {
       name: 'Pro Plan',
