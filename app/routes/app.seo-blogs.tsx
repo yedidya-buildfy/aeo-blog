@@ -168,7 +168,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const actionType = formData.get('actionType');
   const selectedKeyword = formData.get('keyword');
-  const customUrl = formData.get('customUrl');
 
   try {
     const { admin } = await authenticate.admin(request);
@@ -176,15 +175,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const geminiService = new GeminiService();
 
     if (actionType === 'findKeywords' || actionType === 'regenerateKeywords') {
-      // Use custom URL if provided, otherwise use shop's domain
-      let homepageUrl;
-      if (customUrl && typeof customUrl === 'string' && customUrl.trim()) {
-        homepageUrl = customUrl.startsWith('http') ? customUrl : `https://${customUrl}`;
-      } else {
-        const shopService = new ShopifyShopService(admin);
-        const shopInfo = await shopService.getShopInfo();
-        homepageUrl = `https://${shopInfo.primaryDomain}/`;
-      }
+      // Always use shop's homepage URL
+      const shopInfo = await shopService.getShopInfo();
+      const homepageUrl = `https://${shopInfo.primaryDomain}/`;
 
       // If this is regeneration, delete existing keywords first
       if (actionType === 'regenerateKeywords') {
@@ -849,7 +842,6 @@ function SEOBlogs() {
 
   const [keywordData, setKeywordData] = useState<KeywordData | null>(existingKeywords);
   const [generatedBlog, setGeneratedBlog] = useState<any>(null);
-  const [customUrl, setCustomUrl] = useState<string>('https://drive-buddy.com/');
   const [isBlogGenerating, setIsBlogGenerating] = useState<boolean>(false);
 
   // Local state for editable keywords
@@ -953,9 +945,6 @@ function SEOBlogs() {
       if (!keywordData || keywordData.mainProducts.length === 0) {
         const formData = new FormData();
         formData.append('actionType', 'findKeywords');
-        if (customUrl) {
-          formData.append('customUrl', customUrl);
-        }
         fetcher.submit(formData, { method: 'POST' });
 
         // Wait for keywords to be generated before proceeding to blog
@@ -1050,8 +1039,7 @@ function SEOBlogs() {
 
   const handleRegenerateKeywords = () => {
     fetcher.submit({
-      actionType: 'regenerateKeywords',
-      customUrl: customUrl || ''
+      actionType: 'regenerateKeywords'
     }, { method: 'POST' });
   };
 
@@ -1127,15 +1115,6 @@ function SEOBlogs() {
                 <Text as="h3" variant="headingMd">
                   🚀 One-Click SEO Blog Generation
                 </Text>
-
-                <TextField
-                  label="Website URL to analyze (optional)"
-                  value={customUrl}
-                  onChange={setCustomUrl}
-                  placeholder="https://drive-buddy.com/"
-                  helpText="Leave empty to use your shop's domain, or enter a custom URL for testing"
-                  autoComplete="url"
-                />
 
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <Button

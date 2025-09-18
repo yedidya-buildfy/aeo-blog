@@ -96,7 +96,6 @@ export function SEOBlogGenerator({ loaderData, actionData, isLoading, fetcher }:
 
   const [keywordData, setKeywordData] = useState<KeywordData | null>(existingKeywords);
   const [generatedBlog, setGeneratedBlog] = useState<any>(null);
-  const [customUrl, setCustomUrl] = useState<string>('https://drive-buddy.com/');
   const [isBlogGenerating, setIsBlogGenerating] = useState<boolean>(false);
 
   // Local state for editable keywords
@@ -197,9 +196,6 @@ export function SEOBlogGenerator({ loaderData, actionData, isLoading, fetcher }:
       if (!keywordData || keywordData.mainProducts.length === 0) {
         const formData = new FormData();
         formData.append('actionType', 'findKeywords');
-        if (customUrl) {
-          formData.append('customUrl', customUrl);
-        }
         fetcher.submit(formData, { method: 'POST' });
 
         // Wait for keywords to be generated before proceeding to blog
@@ -281,8 +277,7 @@ export function SEOBlogGenerator({ loaderData, actionData, isLoading, fetcher }:
 
   const handleRegenerateKeywords = () => {
     fetcher.submit({
-      actionType: 'regenerateKeywords',
-      customUrl: customUrl || ''
+      actionType: 'regenerateKeywords'
     }, { method: 'POST' });
   };
 
@@ -313,15 +308,6 @@ export function SEOBlogGenerator({ loaderData, actionData, isLoading, fetcher }:
           <Text as="h3" variant="headingMd">
             🚀 One-Click SEO Blog Generation
           </Text>
-
-          <TextField
-            label="Website URL to analyze (optional)"
-            value={customUrl}
-            onChange={setCustomUrl}
-            placeholder="https://drive-buddy.com/"
-            helpText="Leave empty to use your shop's domain, or enter a custom URL for testing"
-            autoComplete="url"
-          />
 
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <Button

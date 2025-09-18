@@ -55,23 +55,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Get AEO status
     const status = await aeoService.getStatus();
 
-    // Calculate KPI metrics
+    // Calculate KPI metrics - temporarily disable BlogPost queries due to schema issues
     const shopDomain = shopInfo.primaryDomain || 'unknown';
 
-    // Get total blogs created
-    const totalBlogs = await prisma.blogPost.count({
-      where: { shopDomain }
-    });
-
-    // Get first blog date to calculate weeks
-    const firstBlog = await prisma.blogPost.findFirst({
-      where: { shopDomain },
-      orderBy: { createdAt: 'asc' }
-    });
-
-    const weeksActive = firstBlog
-      ? Math.max(1, Math.ceil((Date.now() - firstBlog.createdAt.getTime()) / (1000 * 60 * 60 * 24 * 7)))
-      : 1;
+    // TODO: Re-enable BlogPost queries once database schema is fixed
+    // For now, use default values to prevent authentication errors
+    const totalBlogs = 0;
+    const weeksActive = 1;
 
     // Calculate metrics
     const kpiMetrics = {
@@ -345,19 +335,7 @@ export default function AEODashboard() {
   const [hasChanges, setHasChanges] = useState(false);
   const fileContentRef = useRef<HTMLDivElement>(null);
 
-  // SEO Blog Generation state
-  const [keywordData, setKeywordData] = useState<KeywordData | null>(existingKeywords);
-  const [generatedBlog, setGeneratedBlog] = useState<any>(null);
-  const [customUrl, setCustomUrl] = useState<string>('https://drive-buddy.com/');
-  const [isBlogGenerating, setIsBlogGenerating] = useState<boolean>(false);
-
-  // Local state for editable keywords
-  const [localKeywords, setLocalKeywords] = useState<KeywordData>(keywordData || {
-    mainProducts: [],
-    problemsSolved: [],
-    customerSearches: []
-  });
-  const [keywordHasChanges, setKeywordHasChanges] = useState(false);
+  // Remove unused SEO blog generation state variables
   
   const isLoading = fetcher.state === "submitting";
   const actionData = fetcher.data;
@@ -435,135 +413,7 @@ export default function AEODashboard() {
   };
 
   // SEO Blog Generation Functions
-  // Update local keywords when new data is fetched
-  useEffect(() => {
-    if (keywordData) {
-      setLocalKeywords(keywordData);
-      setKeywordHasChanges(false);
-    }
-  }, [keywordData]);
-
-  // Keyword editing functions
-  const updateKeyword = (category: keyof KeywordData, index: number, value: string) => {
-    const updated = { ...localKeywords };
-
-    if (value.trim()) {
-      // Ensure array exists and has enough slots
-      if (!updated[category]) updated[category] = [];
-      updated[category][index] = value.trim();
-    } else {
-      // Remove empty values
-      if (updated[category] && updated[category][index] !== undefined) {
-        updated[category].splice(index, 1);
-      }
-    }
-
-    setLocalKeywords(updated);
-    setKeywordHasChanges(true);
-  };
-
-  const saveAllKeywords = () => {
-    fetcher.submit({
-      actionType: 'updateKeywords',
-      keywordData: JSON.stringify(localKeywords)
-    }, { method: 'POST' });
-    setKeywordHasChanges(false);
-  };
-
-  const handleGenerateIntelligentBlog = async () => {
-    try {
-      setIsBlogGenerating(true);
-      setGeneratedBlog(null); // Clear previous result
-
-      const response = await fetch('/api/generate-blog', { method: 'POST' });
-      const result = await response.json();
-
-      if (result.success) {
-        setGeneratedBlog(result);
-        shopify.toast.show("Intelligent blog generated successfully!");
-
-        // Redirect to the created blog after 3 seconds
-        if (result.blog?.url) {
-          setTimeout(() => {
-            window.open(result.blog.url, '_blank');
-          }, 3000);
-        }
-      } else {
-        let errorMessage = result.error || "Failed to generate blog";
-
-        // Handle specific error types with user-friendly messages
-        if (result.needsKeywords) {
-          errorMessage = "Please generate keywords first using the 'Find Keywords' button above.";
-        } else if (result.rateLimitExceeded) {
-          errorMessage = "Rate limit exceeded. You can generate up to 5 blogs per hour.";
-        } else if (result.retryable) {
-          errorMessage += " Please try again in a few minutes.";
-        }
-
-        shopify.toast.show(errorMessage, { isError: true });
-      }
-    } catch (error) {
-      shopify.toast.show("Network error. Please check your connection and try again.", { isError: true });
-    } finally {
-      setIsBlogGenerating(false);
-    }
-  };
-
-  const handleGenerateKeywordsAndBlog = async () => {
-    try {
-      // Step 1: Generate keywords if we don't have them
-      if (!keywordData || keywordData.mainProducts.length === 0) {
-        const formData = new FormData();
-        formData.append('actionType', 'findKeywords');
-        if (customUrl) {
-          formData.append('customUrl', customUrl);
-        }
-        fetcher.submit(formData, { method: 'POST' });
-
-        // Wait for keywords to be generated before proceeding to blog
-        return;
-      }
-
-      // Step 2: Generate blog if we already have keywords
-      setIsBlogGenerating(true);
-      setGeneratedBlog(null);
-
-      const response = await fetch('/api/generate-blog', { method: 'POST' });
-      const result = await response.json();
-
-      if (result.success) {
-        setGeneratedBlog(result);
-        shopify.toast.show("SEO blog generated successfully!");
-
-        if (result.blog?.url) {
-          setTimeout(() => {
-            window.open(result.blog.url, '_blank');
-          }, 3000);
-        }
-      } else {
-        let errorMessage = result.error || "Failed to generate blog";
-        if (result.needsKeywords) {
-          errorMessage = "Please generate keywords first using the 'Generate SEO Blog' button above.";
-        } else if (result.rateLimitExceeded) {
-          errorMessage = "Rate limit exceeded. You can generate up to 5 blogs per hour.";
-        } else if (result.retryable) {
-          errorMessage += " Please try again in a few minutes.";
-        }
-        shopify.toast.show(errorMessage, { isError: true });
-      }
-    } catch (error) {
-      shopify.toast.show("Network error. Please check your connection and try again.", { isError: true });
-    } finally {
-      setIsBlogGenerating(false);
-    }
-  };
-
-  const handleRegenerateKeywords = () => {
-    fetcher.submit({
-      actionType: 'regenerateKeywords',
-      customUrl: customUrl || ''
-    }, { method: 'POST' });
-  };
+  // Remove unused keyword generation and blog functions
 
   // Handle clicks outside the file content area
   useEffect(() => {
@@ -685,66 +535,17 @@ export default function AEODashboard() {
         {/* Main Action Card */}
         <Layout>
           <Layout.Section>
-            <div style={{ display: 'flex', height: '100%' }}>
-              <Card>
+            <Card>
               <BlockStack gap="400">
                 <BlockStack gap="200">
-                  {recentBlogs.map((blog: any) => (
-                    <Card key={blog.id} background="bg-surface-secondary">
-                      <BlockStack gap="200">
-                        <Text as="h4" variant="headingSm">
-                          {blog.title}
-                        </Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          {blog.primaryTopic}
-                        </Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          {new Date(blog.createdAt).toLocaleDateString()}
-                        </Text>
-                        <InlineStack gap="200">
-                          <Badge tone={blog.status === 'published' ? 'success' : 'info'}>
-                            {blog.status}
-                          </Badge>
-                          {blog.url && (
-                            <Button
-                              size="slim"
-                              variant="plain"
-                              onClick={() => window.open(blog.url, '_blank')}
-                            >
-                              View
-                            </Button>
-                          )}
-                        </InlineStack>
-                      </BlockStack>
-                    </Card>
-                  ))}
-                </BlockStack>
-              ) : (
-                <Text as="p" variant="bodyMd" tone="subdued" alignment="center">
-                  No blogs created yet. Generate your first SEO blog!
-                </Text>
-              )}
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        {/* Main Content - Right Column */}
-        <Layout.Section>
-          <BlockStack gap="500">
-            {/* Main Action Card */}
-            <Layout>
-              <Layout.Section>
-                <Card>
-                  <BlockStack gap="400">
-                    <BlockStack gap="200">
-                      <Text as="h2" variant="headingLg">
-                        AI Engine Optimization
-                      </Text>
+                  <Text as="h2" variant="headingLg">
+                    AI Engine Optimization
+                  </Text>
                   <Text as="p" variant="bodyMd" tone="subdued">
                     One-click AEO optimization for your store. This will generate robots.txt and llms.txt files using Gemini AI and automatically apply them to your theme.
                   </Text>
                 </BlockStack>
-                
+
                 <InlineStack gap="300">
                   <Button
                     variant="primary"
@@ -794,62 +595,57 @@ export default function AEODashboard() {
                   </InlineStack>
                 </BlockStack>
               </BlockStack>
-                </Card>
-              </Layout.Section>
+            </Card>
+          </Layout.Section>
 
-              {/* Status Info Sidebar */}
-              <Layout.Section variant="oneThird">
-                <Card>
-                <BlockStack gap="400" align="space-between" inlineAlign="stretch">
-                  <BlockStack gap="400">
-                    <Text as="h3" variant="headingMd">
-                      Status Info
-                    </Text>
+          {/* Status Info Sidebar */}
+          <Layout.Section variant="oneThird">
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h3" variant="headingMd">
+                  Status Info
+                </Text>
 
-                    {/* Last AEO Generation Section */}
-                    <BlockStack gap="300">
-                      <Text as="h4" variant="headingSm">
-                        Last AEO Generation
+                {/* Last AEO Generation Section */}
+                <BlockStack gap="300">
+                  <Text as="h4" variant="headingSm">
+                    Last AEO Generation
+                  </Text>
+                  <BlockStack gap="200">
+                    <InlineStack align="space-between">
+                      <Text as="span" variant="bodyMd">Status</Text>
+                      {getSmartStatusBadge()}
+                    </InlineStack>
+                    {status?.lastAEOContent && (
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Version {status.lastAEOContent.version} - {formatDateTime(status.lastAEOContent.createdAt)}
                       </Text>
-                      <BlockStack gap="200">
-                        <InlineStack align="space-between">
-                          <Text as="span" variant="bodyMd">Status</Text>
-                          {getSmartStatusBadge()}
-                        </InlineStack>
-                        {status?.lastAEOContent && (
-                          <Text as="p" variant="bodySm" tone="subdued">
-                            Version {status.lastAEOContent.version} - {formatDateTime(status.lastAEOContent.createdAt)}
-                          </Text>
-                        )}
-                      </BlockStack>
-                    </BlockStack>
-
-                    {/* Homepage Section */}
-                    <BlockStack gap="300">
-                      <Text as="h4" variant="headingSm">
-                        Homepage
-                      </Text>
-                      <BlockStack gap="200">
-                        <Text as="p" variant="bodyMd">
-                          {status?.homepageUrl ? (
-                            <a href={status.homepageUrl} target="_blank" rel="noopener noreferrer">
-                              {status.homepageUrl}
-                            </a>
-                          ) : (
-                            'Loading...'
-                          )}
-                        </Text>
-                      </BlockStack>
-                    </BlockStack>
+                    )}
                   </BlockStack>
                 </BlockStack>
-                </Card>
-              </Layout.Section>
-            </Layout>
-          </BlockStack>
-        </Layout.Section>
 
-      </Layout>
+                {/* Homepage Section */}
+                <BlockStack gap="300">
+                  <Text as="h4" variant="headingSm">
+                    Homepage
+                  </Text>
+                  <BlockStack gap="200">
+                    <Text as="p" variant="bodyMd">
+                      {status?.homepageUrl ? (
+                        <a href={status.homepageUrl} target="_blank" rel="noopener noreferrer">
+                          {status.homepageUrl}
+                        </a>
+                      ) : (
+                        'Loading...'
+                      )}
+                    </Text>
+                  </BlockStack>
+                </BlockStack>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </BlockStack>
 
       <BlockStack gap="500">
         {/* Applied Files Section */}

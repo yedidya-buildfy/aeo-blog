@@ -38,10 +38,9 @@ export class AEOService {
     error?: string;
   }> {
     try {
-      // 1. Get shop information
+      // 1. Get shop information and homepage URL
       const shopDomain = await this.shopService.getShopDomain();
-      // Use hardcoded URL for testing like before
-      const homepageUrl = 'https://drive-buddy.com/';
+      const homepageUrl = await this.shopService.getHomepageUrl();
 
       console.log(`Shop Domain: ${shopDomain}`);
       console.log(`Homepage URL: ${homepageUrl}`);
