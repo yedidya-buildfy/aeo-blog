@@ -6,6 +6,7 @@ import { AITopicGeneratorService } from "../services/ai-topic-generator.service"
 import { BlogGeneratorService } from "../services/blog-generator.service";
 import { ShopifyBlogService } from "../services/shopify-blog.service";
 import { ShopifyShopService } from "../services/shopify-shop.service";
+import { BillingService } from "../services/billing.service";
 import prisma from "../db.server";
 
 // Rate limiting storage (in production, use Redis or database)
@@ -34,7 +35,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const shopInfo = await shopService.getShopInfo();
     shopDomain = shopInfo.primaryDomain || 'unknown';
 
-    // Step 2: Rate limiting
+    // Step 2: Check billing limits
+    const billingService = new BillingService(prisma, admin);
+    const canGenerate = await billingService.canGenerateBlog(shopDomain);
+
+    if (!canGenerate) {
+      const usage = await billingService.getUsage(shopDomain);
+      const subscription = await billingService.getSubscription(shopDomain);
+
+      console.log(`[GenerateBlog] Blog limit exceeded for ${shopDomain}: ${usage.blogsGenerated}/${usage.blogLimit}`);
+      return json({
+        success: false,
+        error: `You've reached your weekly blog limit (${usage.blogsGenerated}/${usage.blogLimit}). Upgrade your plan to generate more blogs.`,
+        blogLimitExceeded: true,
+        currentPlan: subscription?.plan || 'free',
+        usage: {
+          blogsGenerated: usage.blogsGenerated,
+          blogLimit: usage.blogLimit
+        }
+      }, { status: 429 });
+    }
+
+    // Step 3: Rate limiting
     const rateLimitResult = checkRateLimit(shopDomain);
     if (!rateLimitResult.allowed) {
       console.log(`[GenerateBlog] Rate limit exceeded for ${shopDomain}`);
@@ -47,7 +69,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`[GenerateBlog] Starting blog generation for ${shopDomain}`);
 
-    // Step 3: Get aggregated keywords
+    // Step 4: Get aggregated keywords
     const keywordService = new KeywordAggregationService(prisma);
     const keywordContext = await keywordService.getKeywordContextForGeneration(shopDomain);
 
@@ -69,7 +91,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`[GenerateBlog] Using ${keywordContext.totalKeywords} keywords for generation`);
 
-    // Step 4: Generate unique blog prompt using AI
+    // Step 5: Generate unique blog prompt using AI
     console.log(`[GenerateBlog] Creating AITopicGeneratorService with prisma:`, !!prisma);
     const topicGenerator = new AITopicGeneratorService(prisma);
     console.log(`[GenerateBlog] AITopicGeneratorService created, calling generateUniqueBlogPrompt`);
@@ -82,7 +104,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`[GenerateBlog] Generated prompt: ${blogPrompt.title} (${blogPrompt.contentAngle})`);
 
-    // Step 5: Generate blog content using AI
+    // Step 6: Generate blog content using AI
     const blogGenerator = new BlogGeneratorService();
     const generatedBlog = await blogGenerator.generateBlog({
       prompt: blogPrompt,
@@ -93,7 +115,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`[GenerateBlog] Generated ${generatedBlog.wordCount} words of content`);
 
-    // Step 6: Publish to Shopify
+    // Step 7: Publish to Shopify
     const shopifyBlogService = new ShopifyBlogService(admin);
     const publishResult = await shopifyBlogService.createAndPublishBlog({
       generatedBlog,
@@ -106,7 +128,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`[GenerateBlog] Published to Shopify: ${publishResult.article?.id}`);
 
-    // Step 7: Save to database for tracking
+    // Step 8: Save to database for tracking
     const blogRecord = await prisma.blogPost.create({
       data: {
         shopDomain,
@@ -126,7 +148,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`[GenerateBlog] Saved to database: ${blogRecord.id}`);
 
-    // Step 8: Return success response
+    // Step 8: Increment blog usage
+    await billingService.incrementBlogUsage(shopDomain);
+    console.log(`[GenerateBlog] Incremented blog usage for ${shopDomain}`);
+
+    // Step 9: Return success response
     return json({
       success: true,
       blog: {

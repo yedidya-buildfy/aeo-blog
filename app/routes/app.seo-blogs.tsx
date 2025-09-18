@@ -13,11 +13,16 @@ import {
   List,
   TextField,
   DataTable,
+  InlineStack,
+  ProgressBar,
+  Banner,
+  Link,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { GeminiService } from "../services/gemini.service";
 import { ShopifyShopService } from "../services/shopify-shop.service";
+import { BillingService } from "../services/billing.service";
 import { checkAutomation } from "../services/automation-middleware.service";
 import { AutomationSchedulerService } from "../services/automation-scheduler.service";
 import prisma from "../db.server";
@@ -125,11 +130,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       console.error('Failed to load automation schedule:', automationError);
     }
 
+    // Load billing information
+    let billing = null;
+    try {
+      const billingService = new BillingService(prisma, admin);
+      const [subscription, usage] = await Promise.all([
+        billingService.getSubscription(shopInfo.primaryDomain || 'unknown'),
+        billingService.getUsage(shopInfo.primaryDomain || 'unknown')
+      ]);
+      billing = { subscription, usage };
+    } catch (billingError) {
+      console.error('Failed to load billing information:', billingError);
+    }
+
     return json({
       shopInfo,
       existingKeywords,
       recentBlogs: [],
       automationSchedule,
+      billing,
       error: null
     });
   } catch (error) {
@@ -139,6 +158,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       existingKeywords: null,
       recentBlogs: [],
       automationSchedule: null,
+      billing: null,
       error: 'Failed to load shop information'
     });
   }
@@ -817,7 +837,7 @@ interface KeywordData {
 }
 
 function SEOBlogs() {
-  const { shopInfo, existingKeywords, recentBlogs, automationSchedule, error: loaderError } = useLoaderData<typeof loader>();
+  const { shopInfo, existingKeywords, recentBlogs, automationSchedule, billing, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
 
   // Remove toast notifications to fix SSR issues
@@ -1038,6 +1058,44 @@ function SEOBlogs() {
     <Page>
       <TitleBar title="Improve My SEO" />
 
+      {/* Billing Information Banner */}
+      {billing && (
+        <Banner
+          title={`Current Plan: ${billing.subscription?.plan?.toUpperCase() || 'FREE'}`}
+          tone={billing.usage?.canGenerateBlog ? "success" : "warning"}
+          action={billing.subscription?.plan === 'free' ? {
+            content: 'Upgrade Plan',
+            url: '/app/billing'
+          } : undefined}
+        >
+          <InlineStack gap="400" align="space-between">
+            <div>
+              <Text as="p" variant="bodySm">
+                Blogs this week: {billing.usage?.blogsGenerated || 0} / {billing.usage?.blogLimit || 1}
+              </Text>
+              {billing.usage && (
+                <ProgressBar
+                  progress={(billing.usage.blogsGenerated / billing.usage.blogLimit) * 100}
+                  tone={billing.usage.canGenerateBlog ? "success" : "critical"}
+                />
+              )}
+            </div>
+            <div>
+              {!billing.usage?.canGenerateBlog && (
+                <Text as="p" variant="bodySm" tone="critical">
+                  Blog limit reached. <Link url="/app/billing">Upgrade to continue</Link>
+                </Text>
+              )}
+              {billing.usage?.canGenerateLlms && (
+                <Text as="p" variant="bodySm" tone="success">
+                  ✅ Auto LLMs.txt enabled
+                </Text>
+              )}
+            </div>
+          </InlineStack>
+        </Banner>
+      )}
+
       <Layout>
         <Layout.Section>
           <Card>
@@ -1073,10 +1131,13 @@ function SEOBlogs() {
                     size="large"
                     onClick={handleGenerateKeywordsAndBlog}
                     loading={isLoading || isBlogGenerating}
+                    disabled={billing && !billing.usage?.canGenerateBlog}
                   >
-                    {isLoading ? 'Finding Keywords...' :
-                     isBlogGenerating ? 'Creating SEO Blog...' :
-                     keywordData ? '🚀 Generate SEO Blog Post' : '🚀 Generate Keywords & SEO Blog'}
+                    {billing && !billing.usage?.canGenerateBlog
+                      ? `Blog Limit Reached (${billing.usage?.blogsGenerated}/${billing.usage?.blogLimit})`
+                      : isLoading ? 'Finding Keywords...'
+                      : isBlogGenerating ? 'Creating SEO Blog...'
+                      : keywordData ? '🚀 Generate SEO Blog Post' : '🚀 Generate Keywords & SEO Blog'}
                   </Button>
 
                   {keywordData && (
@@ -1098,6 +1159,24 @@ function SEOBlogs() {
                     'Creates a unique SEO blog post using your existing keywords. Generates new keywords first if needed.' :
                     'Discovers keywords from your website and creates an SEO-optimized blog post automatically.'}
                 </Text>
+
+                {/* Upgrade prompt when limit reached */}
+                {billing && !billing.usage?.canGenerateBlog && (
+                  <Banner
+                    title="Blog Limit Reached"
+                    tone="warning"
+                    action={{
+                      content: 'Upgrade Plan',
+                      url: '/app/billing'
+                    }}
+                  >
+                    <Text as="p" variant="bodySm">
+                      You've used {billing.usage?.blogsGenerated} of {billing.usage?.blogLimit} blogs this week.
+                      Upgrade to {billing.subscription?.plan === 'free' ? 'Starter ($4.99)' : 'Pro ($9.99)'}
+                      plan to generate more blogs.
+                    </Text>
+                  </Banner>
+                )}
 
                 {localKeywords && (
                   <Card background="bg-surface-secondary">
