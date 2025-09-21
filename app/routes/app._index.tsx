@@ -27,6 +27,8 @@ import { GeminiService } from "../services/gemini.service";
 import { BackupService } from "../services/backup.service";
 import { checkAutomation } from "../services/automation-middleware.service";
 import { AutomationSchedulerService } from "../services/automation-scheduler.service";
+import WizardOverlay from "../components/WizardOverlay";
+import { useNavigate } from "@remix-run/react";
 import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -55,6 +57,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Get AEO status
     const status = await aeoService.getStatus();
 
+    // Check wizard state
+    const wizardState = await shopService.getWizardState();
+    const showWizardSpotlight = !wizardState?.completed;
+
     // Calculate KPI metrics - temporarily disable BlogPost queries due to schema issues
     const shopDomain = shopInfo.primaryDomain || 'unknown';
 
@@ -75,6 +81,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({
       status,
       kpiMetrics,
+      showWizardSpotlight,
       error: null
     });
   } catch (error) {
@@ -97,6 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         timeSavedHours: 0,
         weeksActive: 0
       },
+      showWizardSpotlight: false,
       error: 'Authentication failed'
     });
   }
@@ -323,16 +331,18 @@ interface KeywordData {
 }
 
 export default function AEODashboard() {
-  const { status: initialStatus, kpiMetrics, error: loaderError } = useLoaderData<typeof loader>();
+  const { status: initialStatus, kpiMetrics, showWizardSpotlight, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
+  const navigate = useNavigate();
 
   const [status, setStatus] = useState(initialStatus);
   const [selectedFile, setSelectedFile] = useState<'robots' | 'llms' | null>(null);
   const [editMode, setEditMode] = useState<'robots' | 'llms' | null>(null);
   const [editContent, setEditContent] = useState<string>('');
   const [hasChanges, setHasChanges] = useState(false);
+  const [aeoSuccessTriggered, setAeoSuccessTriggered] = useState(false);
   const fileContentRef = useRef<HTMLDivElement>(null);
 
   // Remove unused SEO blog generation state variables
@@ -353,22 +363,32 @@ export default function AEODashboard() {
       if (actionData.success) {
         const actionType = fetcher.formData?.get('actionType');
         let message = "Operation completed successfully!";
-        
+
         if (actionType === 'improve') {
           message = actionData.message || "AEO improvement completed successfully!";
+          // Trigger wizard progression when AEO succeeds
+          if (showWizardSpotlight) {
+            setAeoSuccessTriggered(true);
+            // Navigate directly to SEO blogs page after short delay
+            setTimeout(() => {
+              navigate('/app/seo-blogs');
+            }, 1500);
+          }
         } else if (actionType === 'restore') {
           message = "Backup restored successfully!";
         }
-        
+
         shopify.toast.show(message);
-        
-        // Refresh to show updated file status in sidebar
-        revalidator.revalidate();
+
+        // Refresh to show updated file status in sidebar (but not if wizard is active)
+        if (!showWizardSpotlight) {
+          revalidator.revalidate();
+        }
       } else {
         shopify.toast.show(`Error: ${actionData.error}`, { isError: true });
       }
     }
-  }, [actionData, shopify, revalidator, fetcher.formData]);
+  }, [actionData, shopify, revalidator, fetcher.formData, showWizardSpotlight]);
 
   const handleRestoreBackup = () => {
     const formData = new FormData();
@@ -502,7 +522,18 @@ export default function AEODashboard() {
 
       <BlockStack gap="500">
         {/* KPI Metrics Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr 1fr',
+            gap: '1rem',
+            transition: 'all 0.3s ease',
+            opacity: showWizardSpotlight ? '0.7' : '1',
+            pointerEvents: showWizardSpotlight ? 'none' : 'auto',
+            filter: showWizardSpotlight ? 'brightness(0.8)' : 'none',
+            transform: showWizardSpotlight ? 'scale(0.95)' : 'scale(1)'
+          }}
+        >
           <Card>
             <div style={{ padding: '1.5rem', textAlign: 'center' }}>
               <Text as="h3" variant="headingMd" fontWeight="medium">Blogs Generated</Text>
@@ -535,7 +566,20 @@ export default function AEODashboard() {
         {/* Main Action Card */}
         <Layout>
           <Layout.Section>
-            <Card>
+            <div
+              style={{
+                transition: 'all 0.3s ease',
+                transform: 'scale(1)',
+                zIndex: showWizardSpotlight ? 1000 : 1,
+                position: 'relative',
+                boxShadow: showWizardSpotlight ? '0 0 30px 8px rgba(0, 123, 255, 0.6)' : 'none',
+                border: showWizardSpotlight ? '3px solid #007bff' : 'none',
+                borderRadius: '12px',
+                backgroundColor: showWizardSpotlight ? '#ffffff' : 'transparent',
+                filter: showWizardSpotlight ? 'brightness(1.1)' : 'none'
+              }}
+            >
+              <Card>
               <BlockStack gap="400">
                 <BlockStack gap="200">
                   <Text as="h2" variant="headingLg">
@@ -596,11 +640,21 @@ export default function AEODashboard() {
                 </BlockStack>
               </BlockStack>
             </Card>
+            </div>
           </Layout.Section>
 
           {/* Status Info Sidebar */}
           <Layout.Section variant="oneThird">
-            <Card>
+            <div
+              style={{
+                transition: 'all 0.3s ease',
+                opacity: showWizardSpotlight ? '0.7' : '1',
+                pointerEvents: showWizardSpotlight ? 'none' : 'auto',
+                filter: showWizardSpotlight ? 'brightness(0.8)' : 'none',
+                transform: showWizardSpotlight ? 'scale(0.95)' : 'scale(1)'
+              }}
+            >
+              <Card>
               <BlockStack gap="400">
                 <Text as="h3" variant="headingMd">
                   Status Info
@@ -643,12 +697,22 @@ export default function AEODashboard() {
                 </BlockStack>
               </BlockStack>
             </Card>
+            </div>
           </Layout.Section>
         </Layout>
       </BlockStack>
 
-      <BlockStack gap="500">
-        {/* Applied Files Section */}
+      <div
+        style={{
+          transition: 'all 0.3s ease',
+          opacity: showWizardSpotlight ? '0.7' : '1',
+          pointerEvents: showWizardSpotlight ? 'none' : 'auto',
+          filter: showWizardSpotlight ? 'brightness(0.8)' : 'none',
+          transform: showWizardSpotlight ? 'scale(0.95)' : 'scale(1)'
+        }}
+      >
+        <BlockStack gap="500">
+          {/* Applied Files Section */}
         {actionData && actionData.success && 'generatedRobots' in actionData && 'generatedLlms' in actionData && fetcher.formData?.get('actionType') === 'improve' && (
           <Layout>
             <Layout.Section>
@@ -855,7 +919,19 @@ export default function AEODashboard() {
           </Layout>
         )}
 
-      </BlockStack>
+        </BlockStack>
+      </div>
+
+      {/* Wizard Overlay */}
+      {showWizardSpotlight && (
+        <WizardOverlay
+          isActive={showWizardSpotlight}
+          onComplete={() => window.location.reload()}
+          onSkip={() => window.location.reload()}
+          aeoSuccessTriggered={aeoSuccessTriggered}
+          onNavigateToSEOBlogs={() => navigate('/app/seo-blogs')}
+        />
+      )}
     </Page>
   );
 }

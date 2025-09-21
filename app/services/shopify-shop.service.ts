@@ -57,4 +57,80 @@ export class ShopifyShopService {
     const domain = await this.getShopDomain();
     return `https://${domain}`;
   }
+
+  async getWizardState(): Promise<{ completed: boolean; step?: number } | null> {
+    const query = `
+      query {
+        shop {
+          metafield(namespace: "aeo_wizard", key: "state") {
+            value
+          }
+        }
+      }
+    `;
+
+    try {
+      const response = await this.admin.graphql(query);
+      const data = await response.json();
+
+      if (data.errors) {
+        console.error('GraphQL errors getting wizard state:', data.errors);
+        return null;
+      }
+
+      const metafield = data.data?.shop?.metafield;
+      if (!metafield?.value) {
+        return null;
+      }
+
+      return JSON.parse(metafield.value);
+    } catch (error) {
+      console.error('Error getting wizard state:', error);
+      return null;
+    }
+  }
+
+  async setWizardState(state: { completed: boolean; step?: number }): Promise<boolean> {
+    const shopInfo = await this.getShopInfo();
+    const shopGid = `gid://shopify/Shop/${shopInfo.id}`;
+
+    const mutation = `
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
+            id
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      metafields: [{
+        namespace: "aeo_wizard",
+        key: "state",
+        type: "json",
+        value: JSON.stringify(state),
+        ownerId: shopGid
+      }]
+    };
+
+    try {
+      const response = await this.admin.graphql(mutation, { variables });
+      const data = await response.json();
+
+      if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
+        console.error('Error setting wizard state:', data.errors || data.data?.metafieldsSet?.userErrors);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error setting wizard state:', error);
+      return false;
+    }
+  }
 }

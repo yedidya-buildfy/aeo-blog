@@ -25,6 +25,7 @@ import { ShopifyShopService } from "../services/shopify-shop.service";
 import { BillingService } from "../services/billing.service";
 import { checkAutomation } from "../services/automation-middleware.service";
 import { AutomationSchedulerService } from "../services/automation-scheduler.service";
+import WizardOverlay from "../components/WizardOverlay";
 import prisma from "../db.server";
 
 // Language-aware fallback keywords function
@@ -83,6 +84,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     // Check automation asynchronously (non-blocking)
     checkAutomation(shopInfo.primaryDomain || 'unknown', admin);
+
+    // Check wizard state
+    const wizardState = await shopService.getWizardState();
+    const showWizardSpotlight = !wizardState?.completed;
 
     // Load existing keywords from database
     let existingKeywords = null;
@@ -149,6 +154,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       recentBlogs: [],
       automationSchedule,
       billing,
+      showWizardSpotlight,
       error: null
     });
   } catch (error) {
@@ -159,6 +165,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       recentBlogs: [],
       automationSchedule: null,
       billing: null,
+      showWizardSpotlight: false,
       error: 'Failed to load shop information'
     });
   }
@@ -830,7 +837,7 @@ interface KeywordData {
 }
 
 function SEOBlogs() {
-  const { shopInfo, existingKeywords, recentBlogs, automationSchedule, billing, error: loaderError } = useLoaderData<typeof loader>();
+  const { shopInfo, existingKeywords, recentBlogs, automationSchedule, billing, showWizardSpotlight, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
 
   // Remove toast notifications to fix SSR issues
@@ -1336,6 +1343,16 @@ function SEOBlogs() {
           </Card>
         </Layout.Section>
       </Layout>
+
+      {/* Wizard Overlay for Step 2 - Plan Selection */}
+      {showWizardSpotlight && (
+        <WizardOverlay
+          isActive={showWizardSpotlight}
+          onComplete={() => window.location.reload()}
+          onSkip={() => window.location.reload()}
+          startFromStep={2}
+        />
+      )}
     </Page>
   );
 }

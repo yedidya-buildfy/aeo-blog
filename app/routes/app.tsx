@@ -1,22 +1,61 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet, useLoaderData, useRouteError } from "@remix-run/react";
+import type { HeadersFunction, LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { Link, Outlet, useLoaderData, useRouteError, useFetcher } from "@remix-run/react";
 import { boundary } from "@shopify/shopify-app-remix/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
 import { authenticate } from "../shopify.server";
+import { ShopifyShopService } from "../services/shopify-shop.service";
+import WizardOverlay from "../components/WizardOverlay";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
 
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  // Check wizard state
+  const shopService = new ShopifyShopService(admin);
+  const wizardState = await shopService.getWizardState();
+  const showWizard = !wizardState?.completed;
+
+  return {
+    apiKey: process.env.SHOPIFY_API_KEY || "",
+    showWizard
+  };
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { admin } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const actionType = formData.get('actionType');
+
+  if (actionType === 'completeWizard') {
+    const shopService = new ShopifyShopService(admin);
+    const success = await shopService.setWizardState({ completed: true });
+
+    return json({ success });
+  }
+
+  return json({ success: false, error: 'Invalid action type' });
 };
 
 export default function App() {
-  const { apiKey } = useLoaderData<typeof loader>();
+  const { apiKey, showWizard } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher();
+
+  const handleWizardComplete = () => {
+    const formData = new FormData();
+    formData.append('actionType', 'completeWizard');
+    fetcher.submit(formData, { method: 'POST' });
+  };
+
+  const handleWizardSkip = () => {
+    const formData = new FormData();
+    formData.append('actionType', 'completeWizard');
+    fetcher.submit(formData, { method: 'POST' });
+  };
 
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
@@ -31,6 +70,15 @@ export default function App() {
           Billing & Plans
         </Link>
       </NavMenu>
+
+      {showWizard && (
+        <WizardOverlay
+          isActive={showWizard}
+          onComplete={handleWizardComplete}
+          onSkip={handleWizardSkip}
+        />
+      )}
+
       <Outlet />
     </AppProvider>
   );
