@@ -121,15 +121,16 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
         border: '1px solid #e1e1e1',
         borderRadius: '8px',
         padding: '1rem',
-        fontSize: '14px'
+        fontSize: '14px',
+        overflow: 'hidden'
       }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #e1e1e1' }}>Feature</th>
-              <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #e1e1e1' }}>Free</th>
-              <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #e1e1e1' }}>Starter</th>
-              <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #e1e1e1' }}>Pro</th>
+              <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #e1e1e1', width: '40%' }}>Feature</th>
+              <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #e1e1e1', width: '20%' }}>Free</th>
+              <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #e1e1e1', width: '20%' }}>Starter</th>
+              <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #e1e1e1', width: '20%' }}>Pro</th>
             </tr>
           </thead>
           <tbody>
@@ -169,21 +170,27 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
               <td style={{ textAlign: 'center', padding: '8px 12px' }}>$4.99/mo</td>
               <td style={{ textAlign: 'center', padding: '8px 12px' }}>$9.99/mo</td>
             </tr>
+            <tr>
+              <td style={{ padding: '8px 12px', borderTop: '2px solid #e1e1e1' }}></td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderTop: '2px solid #e1e1e1' }}>
+                <Button size="slim" onClick={() => handleSelectPlan('free')}>
+                  Select Free
+                </Button>
+              </td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderTop: '2px solid #e1e1e1' }}>
+                <Button size="slim" onClick={() => handleSelectPlan('starter')}>
+                  Starter
+                </Button>
+              </td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderTop: '2px solid #e1e1e1' }}>
+                <Button size="slim" onClick={() => handleSelectPlan('pro')}>
+                  Pro
+                </Button>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
-
-      <InlineStack gap="300">
-        <Button onClick={() => handleSelectPlan('free')}>
-          Select Free
-        </Button>
-        <Button onClick={() => handleSelectPlan('starter')}>
-          Select Starter
-        </Button>
-        <Button onClick={() => handleSelectPlan('pro')}>
-          Select Pro
-        </Button>
-      </InlineStack>
     </BlockStack>
   );
 
@@ -267,8 +274,8 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
         bottom: '20px',
         right: '20px',
         zIndex: 1000,
-        width: '400px',
-        maxHeight: '80vh',
+        width: '650px',
+        maxHeight: '100vh',
         overflow: 'auto'
       }}>
         <Card>
