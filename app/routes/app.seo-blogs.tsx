@@ -147,6 +147,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     let billing = null;
     try {
       const billingService = new BillingService(prisma, admin);
+
+      // If planConfirmed is true, verify payment with Shopify and update our database
+      if (planConfirmed) {
+        const { admin: billingAdmin, billing: shopifyBilling } = await authenticate.admin(request);
+        const { hasActivePayment, appSubscriptions } = await shopifyBilling.check();
+
+        if (hasActivePayment && appSubscriptions && appSubscriptions.length > 0) {
+          const activeSubscription = appSubscriptions[0];
+          let plan = 'starter';
+          if (activeSubscription.name?.toLowerCase().includes('pro')) {
+            plan = 'pro';
+          }
+
+          // Update our database with the confirmed subscription
+          await prisma.subscription.upsert({
+            where: { shopDomain: shopInfo.primaryDomain || 'unknown' },
+            update: {
+              plan: plan as 'starter' | 'pro',
+              status: 'active',
+              billingOn: new Date(),
+              shopifyChargeId: activeSubscription.id
+            },
+            create: {
+              shopDomain: shopInfo.primaryDomain || 'unknown',
+              plan: plan as 'starter' | 'pro',
+              status: 'active',
+              billingOn: new Date(),
+              shopifyChargeId: activeSubscription.id
+            }
+          });
+
+          console.log(`[SEO-Blogs] Payment confirmed for ${plan} plan`);
+        }
+      }
+
       const [subscription, usage] = await Promise.all([
         billingService.getSubscription(shopInfo.primaryDomain || 'unknown'),
         billingService.getUsage(shopInfo.primaryDomain || 'unknown')
