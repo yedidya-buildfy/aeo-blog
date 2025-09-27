@@ -87,7 +87,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     // Check wizard state
     const wizardState = await shopService.getWizardState();
-    const showWizardSpotlight = !wizardState?.completed;
+
+    // Check URL parameters for wizard state
+    const url = new URL(request.url);
+    const forceShowWizard = url.searchParams.get('showWizard') === 'true';
+    const planConfirmed = url.searchParams.get('planConfirmed') === 'true';
+    const paymentError = url.searchParams.get('paymentError') === 'true';
+    const step = url.searchParams.get('step') ? parseInt(url.searchParams.get('step')!) : undefined;
+
+    const showWizardSpotlight = !wizardState?.completed || forceShowWizard;
 
     // Load existing keywords from database
     let existingKeywords = null;
@@ -155,6 +163,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       automationSchedule,
       billing,
       showWizardSpotlight,
+      wizardStep: step,
+      planConfirmed,
+      paymentError,
       error: null
     });
   } catch (error) {
@@ -166,6 +177,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       automationSchedule: null,
       billing: null,
       showWizardSpotlight: false,
+      wizardStep: undefined,
+      planConfirmed: false,
+      paymentError: false,
       error: 'Failed to load shop information'
     });
   }
@@ -837,7 +851,7 @@ interface KeywordData {
 }
 
 function SEOBlogs() {
-  const { shopInfo, existingKeywords, recentBlogs, automationSchedule, billing, showWizardSpotlight, error: loaderError } = useLoaderData<typeof loader>();
+  const { shopInfo, existingKeywords, recentBlogs, automationSchedule, billing, showWizardSpotlight, wizardStep, planConfirmed, paymentError, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
 
   // Remove toast notifications to fix SSR issues
@@ -1339,6 +1353,27 @@ function SEOBlogs() {
                   Automatically publishes 1 blog per week
                 </Text>
               </BlockStack>
+
+              {/* Run Wizard Again (only show if wizard was previously completed) */}
+              {!showWizardSpotlight && (
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingMd">
+                    Need Help?
+                  </Text>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      // Temporarily reset wizard state to show it again
+                      window.location.href = window.location.href + '?showWizard=true';
+                    }}
+                  >
+                    Run Setup Wizard Again
+                  </Button>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Re-run the guided setup process if you need help
+                  </Text>
+                </BlockStack>
+              )}
             </BlockStack>
           </Card>
         </Layout.Section>
@@ -1348,9 +1383,17 @@ function SEOBlogs() {
       {showWizardSpotlight && (
         <WizardOverlay
           isActive={showWizardSpotlight}
-          onComplete={() => window.location.reload()}
-          onSkip={() => window.location.reload()}
-          startFromStep={2}
+          onComplete={() => {
+            // Force a reload to reflect the wizard completion state
+            window.location.reload();
+          }}
+          onSkip={() => {
+            // Skip wizard but don't mark as completed - user can run it again
+            window.location.reload();
+          }}
+          startFromStep={wizardStep as (1 | 2 | 3) || 2}
+          planConfirmed={planConfirmed}
+          paymentError={paymentError}
         />
       )}
     </Page>

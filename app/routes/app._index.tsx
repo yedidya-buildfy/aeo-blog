@@ -57,12 +57,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Get AEO status
     const status = await aeoService.getStatus();
 
+    // Calculate KPI metrics - temporarily disable BlogPost queries due to schema issues
+    // DEV NOTE: Original code for production
+    // const shopDomain = shopInfo.primaryDomain || 'unknown';
+
+    // TEMP TEST: Using drive-buddy.com for testing
+    const shopDomain = 'drive-buddy.com';
+
     // Check wizard state
     const wizardState = await shopService.getWizardState();
     const showWizardSpotlight = !wizardState?.completed;
-
-    // Calculate KPI metrics - temporarily disable BlogPost queries due to schema issues
-    const shopDomain = shopInfo.primaryDomain || 'unknown';
 
     // TODO: Re-enable BlogPost queries once database schema is fixed
     // For now, use default values to prevent authentication errors
@@ -86,6 +90,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   } catch (error) {
     console.error('Error in loader:', error);
+    console.log('[DEBUG] Setting showWizardSpotlight to TRUE due to GraphQL error');
 
     // Return default state for authentication issues
     return json({
@@ -104,7 +109,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         timeSavedHours: 0,
         weeksActive: 0
       },
-      showWizardSpotlight: false,
+      showWizardSpotlight: true,
       error: 'Authentication failed'
     });
   }
@@ -332,6 +337,9 @@ interface KeywordData {
 
 export default function AEODashboard() {
   const { status: initialStatus, kpiMetrics, showWizardSpotlight, error: loaderError } = useLoaderData<typeof loader>();
+
+  // DEBUG: Log the spotlight value
+  console.log('[DEBUG Component] showWizardSpotlight =', showWizardSpotlight);
   const fetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
@@ -369,10 +377,13 @@ export default function AEODashboard() {
           // Trigger wizard progression when AEO succeeds
           if (showWizardSpotlight) {
             setAeoSuccessTriggered(true);
-            // Navigate directly to SEO blogs page after short delay
+            // Dispatch custom event for parent component to handle wizard progression
+            window.dispatchEvent(new CustomEvent('aeoSuccess'));
+          } else {
+            // If wizard is not active, redirect directly to SEO blogs page with wizard forced
             setTimeout(() => {
-              navigate('/app/seo-blogs');
-            }, 1500);
+              navigate('/app/seo-blogs?showWizard=true');
+            }, 2000); // 2 second delay to show the success message
           }
         } else if (actionType === 'restore') {
           message = "Backup restored successfully!";
@@ -388,7 +399,7 @@ export default function AEODashboard() {
         shopify.toast.show(`Error: ${actionData.error}`, { isError: true });
       }
     }
-  }, [actionData, shopify, revalidator, fetcher.formData, showWizardSpotlight]);
+  }, [actionData, shopify, revalidator, fetcher.formData, showWizardSpotlight, navigate]);
 
   const handleRestoreBackup = () => {
     const formData = new FormData();
@@ -484,7 +495,7 @@ export default function AEODashboard() {
   if (loaderError === 'Failed to fetch status' && (!status || status.shopDomain === 'Authenticating...')) {
     return (
       <Page>
-        <TitleBar title="AEO One-Click (Gemini Direct)" />
+        <TitleBar title="AEO One-Click" />
         <Layout>
           <Layout.Section>
             <Card>
@@ -518,7 +529,7 @@ export default function AEODashboard() {
 
   return (
     <Page>
-      <TitleBar title="AEO One-Click (Gemini Direct)" />
+      <TitleBar title="AEO One-Click" />
 
       <BlockStack gap="500">
         {/* KPI Metrics Cards */}
@@ -570,13 +581,13 @@ export default function AEODashboard() {
               style={{
                 transition: 'all 0.3s ease',
                 transform: 'scale(1)',
-                zIndex: showWizardSpotlight ? 1000 : 1,
+                zIndex: 1000, // TEMP: Always high z-index to be above dimming
                 position: 'relative',
-                boxShadow: showWizardSpotlight ? '0 0 30px 8px rgba(0, 123, 255, 0.6)' : 'none',
-                border: showWizardSpotlight ? '3px solid #007bff' : 'none',
+                boxShadow: '0 0 30px 8px rgba(0, 123, 255, 0.6)', // TEMP: Always highlight for debugging
+                border: '3px solid #007bff', // TEMP: Always highlight for debugging
                 borderRadius: '12px',
-                backgroundColor: showWizardSpotlight ? '#ffffff' : 'transparent',
-                filter: showWizardSpotlight ? 'brightness(1.1)' : 'none'
+                backgroundColor: '#ffffff', // TEMP: Always bright white background
+                filter: 'brightness(1.2) !important' // TEMP: Always bright and override any dimming
               }}
             >
               <Card>

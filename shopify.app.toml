@@ -2,7 +2,7 @@
 
 client_id = "713e392200c11ec75b67214074fed613"
 name = "aeo-blog"
-application_url = "https://example.com"
+application_url = "https://fossil-offices-democratic-fashion.trycloudflare.com"
 embedded = true
 
 [build]
@@ -25,4 +25,4 @@ api_version = "2025-10"
 scopes = "write_themes,read_themes,write_content"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://fossil-offices-democratic-fashion.trycloudflare.com/auth/callback" ]

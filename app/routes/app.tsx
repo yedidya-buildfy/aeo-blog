@@ -1,10 +1,11 @@
 import type { HeadersFunction, LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, Outlet, useLoaderData, useRouteError, useFetcher } from "@remix-run/react";
+import { Link, Outlet, useLoaderData, useRouteError, useFetcher, useNavigate } from "@remix-run/react";
 import { boundary } from "@shopify/shopify-app-remix/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
+import { useState, useEffect } from "react";
 
 import { authenticate } from "../shopify.server";
 import { ShopifyShopService } from "../services/shopify-shop.service";
@@ -15,10 +16,15 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
 
-  // Check wizard state
+  // Check wizard state - TEMP: Force show wizard for debugging
   const shopService = new ShopifyShopService(admin);
-  const wizardState = await shopService.getWizardState();
-  const showWizard = !wizardState?.completed;
+  let wizardState = null;
+  try {
+    wizardState = await shopService.getWizardState();
+  } catch (error) {
+    console.log('[DEBUG] Failed to get wizard state, will show wizard:', error);
+  }
+  const showWizard = true; // TEMP: Always show wizard for debugging
 
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
@@ -44,6 +50,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function App() {
   const { apiKey, showWizard } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+  const navigate = useNavigate();
+  const [aeoSuccessTriggered, setAeoSuccessTriggered] = useState(false);
+
+  // Listen for messages from child components about AEO success
+  useEffect(() => {
+    const handleAeoSuccess = () => {
+      setAeoSuccessTriggered(true);
+    };
+
+    // Listen for custom events from dashboard
+    window.addEventListener('aeoSuccess', handleAeoSuccess);
+
+    return () => {
+      window.removeEventListener('aeoSuccess', handleAeoSuccess);
+    };
+  }, []);
 
   const handleWizardComplete = () => {
     const formData = new FormData();
@@ -56,6 +78,11 @@ export default function App() {
     formData.append('actionType', 'completeWizard');
     fetcher.submit(formData, { method: 'POST' });
   };
+
+  const handleNavigateToSEOBlogs = () => {
+    navigate('/app/seo-blogs');
+  };
+
 
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
@@ -76,6 +103,8 @@ export default function App() {
           isActive={showWizard}
           onComplete={handleWizardComplete}
           onSkip={handleWizardSkip}
+          aeoSuccessTriggered={aeoSuccessTriggered}
+          onNavigateToSEOBlogs={handleNavigateToSEOBlogs}
         />
       )}
 

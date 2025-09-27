@@ -8,6 +8,7 @@ import {
   Badge,
   Spinner,
 } from "@shopify/polaris";
+import { useFetcher } from "@remix-run/react";
 
 interface WizardOverlayProps {
   isActive: boolean;
@@ -16,6 +17,8 @@ interface WizardOverlayProps {
   aeoSuccessTriggered?: boolean;
   onNavigateToSEOBlogs?: () => void;
   startFromStep?: 1 | 2 | 3;
+  planConfirmed?: boolean;
+  paymentError?: boolean;
 }
 
 interface WizardState {
@@ -26,9 +29,16 @@ interface WizardState {
   blogsCompleted: boolean;
   isAEORunning: boolean;
   isBlogGenerating: boolean;
+  isProcessingPayment: boolean;
+  currentOperation: string;
+  error: string | null;
+  showSuccess: boolean;
+  autoCloseTimer: number;
 }
 
-export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccessTriggered, onNavigateToSEOBlogs, startFromStep = 1 }: WizardOverlayProps) {
+export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccessTriggered, onNavigateToSEOBlogs, startFromStep = 1, planConfirmed = false, paymentError = false }: WizardOverlayProps) {
+  const fetcher = useFetcher();
+  const planSelectionFetcher = useFetcher();
   const [wizardState, setWizardState] = useState<WizardState>({
     currentStep: startFromStep,
     selectedPlan: null,
@@ -37,6 +47,11 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
     blogsCompleted: false,
     isAEORunning: false,
     isBlogGenerating: false,
+    isProcessingPayment: false,
+    currentOperation: '',
+    error: null,
+    showSuccess: false,
+    autoCloseTimer: 0,
   });
 
   // Listen for AEO success from parent
@@ -57,32 +72,130 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
     }
   }, [aeoSuccessTriggered, onNavigateToSEOBlogs]);
 
+  // Handle billing confirmation or error from URL parameters
+  useEffect(() => {
+    if (planConfirmed) {
+      console.log('[Wizard] Plan confirmed from billing, advancing to step 3');
+      setWizardState(prev => ({
+        ...prev,
+        currentStep: 3,
+        planSelected: true,
+        isProcessingPayment: false,
+        error: null
+      }));
+    } else if (paymentError) {
+      console.log('[Wizard] Payment error detected, showing error in step 2');
+      setWizardState(prev => ({
+        ...prev,
+        currentStep: 2,
+        planSelected: false,
+        isProcessingPayment: false,
+        error: 'Payment was cancelled or failed. Please try selecting a plan again.'
+      }));
+    }
+  }, [planConfirmed, paymentError]);
+
   if (!isActive) return null;
 
-  const handleSelectPlan = (plan: 'free' | 'starter' | 'pro') => {
+  const handleSelectPlan = async (plan: 'free' | 'starter' | 'pro') => {
+    console.log(`[Wizard] Plan selected: ${plan}`);
+
     setWizardState(prev => ({
       ...prev,
       selectedPlan: plan,
-      planSelected: true,
-      currentStep: 3
+      isProcessingPayment: plan !== 'free',
+      error: null,
+      currentOperation: plan === 'free' ? 'Activating free plan...' : 'Redirecting to billing...'
     }));
-  };
 
-  const handleStartBlogGeneration = () => {
-    setWizardState(prev => ({ ...prev, isBlogGenerating: true }));
-
-    // Simulate blog generation completion
-    setTimeout(() => {
+    if (plan === 'free') {
+      // For free plan, proceed directly to step 3
       setWizardState(prev => ({
         ...prev,
-        isBlogGenerating: false,
-        blogsCompleted: true
+        planSelected: true,
+        currentStep: 3,
+        isProcessingPayment: false,
+        currentOperation: '',
+        error: null
       }));
-      // Complete wizard after blogs are done
-      setTimeout(() => {
-        onComplete();
-      }, 1000);
-    }, 4000);
+    } else {
+      // For paid plans, use the simple billing route
+      planSelectionFetcher.submit(
+        { plan },
+        { method: 'POST', action: '/api/subscribe' }
+      );
+    }
+  };
+
+  // Watch for fetcher state changes
+  useEffect(() => {
+    if (fetcher.state === 'submitting') {
+      setWizardState(prev => ({
+        ...prev,
+        isBlogGenerating: true,
+        error: null,
+        currentOperation: 'Setting up your blog system...'
+      }));
+    } else if (fetcher.state === 'idle' && fetcher.data) {
+      if ((fetcher.data as any)?.success) {
+        setWizardState(prev => ({
+          ...prev,
+          isBlogGenerating: false,
+          blogsCompleted: true,
+          showSuccess: true,
+          autoCloseTimer: 5,
+          currentOperation: '🎉 Setup Complete! Your AEO improvements are now active.'
+        }));
+
+        // Start countdown timer for auto-close
+        const countdown = setInterval(() => {
+          setWizardState(prev => {
+            if (prev.autoCloseTimer <= 1) {
+              clearInterval(countdown);
+              setTimeout(() => onComplete(), 100);
+              return prev;
+            }
+            return { ...prev, autoCloseTimer: prev.autoCloseTimer - 1 };
+          });
+        }, 1000);
+      } else {
+        setWizardState(prev => ({
+          ...prev,
+          isBlogGenerating: false,
+          error: (fetcher.data as any)?.error || 'Setup failed. Please try again.',
+          currentOperation: ''
+        }));
+      }
+    }
+  }, [fetcher.state, fetcher.data, onComplete]);
+
+  // Watch for plan selection fetcher state changes (for paid plans only)
+  useEffect(() => {
+    if (planSelectionFetcher.state === 'idle' && planSelectionFetcher.data) {
+      const data = planSelectionFetcher.data as any;
+
+      if (data.success) {
+        // Simple billing route just redirects automatically via billing.request()
+        // No need to manually redirect - Shopify handles it
+        console.log('[Wizard] Payment processing initiated via Shopify billing');
+      } else {
+        // Error in plan selection
+        setWizardState(prev => ({
+          ...prev,
+          error: data.error || 'Failed to select plan. Please try again.',
+          isProcessingPayment: false,
+          currentOperation: ''
+        }));
+      }
+    }
+  }, [planSelectionFetcher.state, planSelectionFetcher.data]);
+
+  const handleStartBlogGeneration = () => {
+    // Use fetcher to call our server action with proper authentication
+    fetcher.submit({}, {
+      method: 'POST',
+      action: '/api/wizard-setup'
+    });
   };
 
   const renderStep1 = () => (
@@ -112,10 +225,36 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
     </BlockStack>
   );
 
-  const renderStep2 = () => (
-    <BlockStack gap="400">
-      <Text as="h2" variant="headingLg">Choose Your AEO Plan</Text>
-      <Text as="p" variant="bodyMd" tone="success">✅ AEO Foundation Complete!</Text>
+  const renderStep2 = () => {
+    if (wizardState.isProcessingPayment) {
+      return (
+        <BlockStack gap="400">
+          <Text as="h2" variant="headingLg">Processing Payment...</Text>
+          <BlockStack gap="300" align="center">
+            <Spinner size="large" />
+            <Text as="p" variant="bodyMd">
+              {wizardState.currentOperation}
+            </Text>
+            {wizardState.selectedPlan !== 'free' && (
+              <Text as="p" variant="bodySm" tone="subdued">
+                You'll be redirected to Shopify's secure billing page
+              </Text>
+            )}
+          </BlockStack>
+        </BlockStack>
+      );
+    }
+
+    return (
+      <BlockStack gap="400">
+        <Text as="h2" variant="headingLg">Choose Your AEO Plan</Text>
+        <Text as="p" variant="bodyMd" tone="success">✅ AEO Foundation Complete!</Text>
+
+        {wizardState.error && (
+          <BlockStack gap="200" align="center">
+            <Text as="p" variant="bodyMd" tone="critical">❌ {wizardState.error}</Text>
+          </BlockStack>
+        )}
 
       <div style={{
         border: '1px solid #e1e1e1',
@@ -192,7 +331,8 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
         </table>
       </div>
     </BlockStack>
-  );
+    );
+  };
 
   const renderStep3 = () => (
     <BlockStack gap="400">
@@ -205,19 +345,62 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
         <Badge tone="info">{`Selected: ${wizardState.selectedPlan.charAt(0).toUpperCase() + wizardState.selectedPlan.slice(1)} Plan`}</Badge>
       )}
 
-      {wizardState.isBlogGenerating ? (
+      {wizardState.error ? (
+        <BlockStack gap="300" align="center">
+          <Text as="p" variant="bodyMd" tone="critical">❌ Setup Failed</Text>
+          <Text as="p" variant="bodySm" tone="critical">
+            {wizardState.error}
+          </Text>
+          <Button
+            variant="primary"
+            onClick={() => {
+              setWizardState(prev => ({ ...prev, error: null }));
+              handleStartBlogGeneration();
+            }}
+          >
+            Try Again
+          </Button>
+        </BlockStack>
+      ) : wizardState.isBlogGenerating ? (
         <BlockStack gap="300" align="center">
           <Spinner size="large" />
           <Text as="p" variant="bodyMd">🎯 Setting Up Your Blog System...</Text>
-          {wizardState.selectedPlan === 'pro' ? (
-            <Text as="p" variant="bodySm" tone="subdued">
-              🔄 Generating 10 initial blogs for Pro plan...
+          <Text as="p" variant="bodySm" tone="subdued">
+            {wizardState.currentOperation}
+          </Text>
+          <Text as="p" variant="bodySm" tone="subdued">
+            This may take 30-60 seconds...
+          </Text>
+        </BlockStack>
+      ) : wizardState.showSuccess ? (
+        <BlockStack gap="400" align="center">
+          <div style={{
+            fontSize: '48px',
+            textAlign: 'center',
+            marginBottom: '1rem'
+          }}>
+            🎉
+          </div>
+          <Text as="h3" variant="headingLg" tone="success">
+            Success! Setup Complete!
+          </Text>
+          <BlockStack gap="200" align="center">
+            <Text as="p" variant="bodyMd" tone="success">
+              ✅ Keywords discovered and saved
             </Text>
-          ) : (
-            <Text as="p" variant="bodySm" tone="subdued">
-              🔄 Creating your first SEO blog...
+            <Text as="p" variant="bodyMd" tone="success">
+              ✅ First SEO blog post created
             </Text>
-          )}
+            <Text as="p" variant="bodyMd" tone="success">
+              ✅ Weekly automation enabled
+            </Text>
+          </BlockStack>
+          <Text as="p" variant="bodySm" tone="subdued">
+            Your AEO improvements are now active and working!
+          </Text>
+          <Text as="p" variant="bodySm" tone="subdued">
+            Closing wizard in {wizardState.autoCloseTimer} seconds...
+          </Text>
         </BlockStack>
       ) : wizardState.blogsCompleted ? (
         <BlockStack gap="300" align="center">

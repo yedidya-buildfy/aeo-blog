@@ -1,3 +1,4 @@
+import { config } from "dotenv";
 import { PassThrough } from "stream";
 import { renderToPipeableStream } from "react-dom/server";
 import { RemixServer } from "@remix-run/react";
@@ -7,6 +8,8 @@ import {
 } from "@remix-run/node";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
+
+config();
 
 export const streamTimeout = 5000;
 

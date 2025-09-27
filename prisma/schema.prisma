@@ -90,29 +90,29 @@ model AEOContent {
 }
 
 model TopicBatch {
-  id         String   @id @default(cuid())
-  shopDomain String
+  id          String   @id @default(cuid())
+  shopDomain  String
   batchNumber Int
-  topics     String   // JSON string containing GeneratedTopic[]
-  usedTopics String   // JSON string containing used topic titles
-  createdAt  DateTime @default(now())
+  topics      String
+  usedTopics  String
+  createdAt   DateTime @default(now())
 
   @@unique([shopDomain, batchNumber])
   @@index([shopDomain])
 }
 
 model AutomationSchedule {
-  id               String    @id @default(cuid())
-  shopDomain       String    @unique
-  enabled          Boolean   @default(false)
-  frequency        String    @default("weekly") // 'weekly' for now
-  targetDayOfWeek  Int       @default(0) // 0 = Sunday, 1 = Monday, etc.
-  targetHourIST    Int       @default(10) // 10 AM Israel time
-  lastGeneratedAt  DateTime?
-  nextTargetDate   DateTime?
-  status           String    @default("idle") // 'idle', 'generating', 'completed', 'error'
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  shopDomain      String    @unique
+  enabled         Boolean   @default(false)
+  frequency       String    @default("weekly")
+  targetDayOfWeek Int       @default(0)
+  targetHourIST   Int       @default(10)
+  lastGeneratedAt DateTime?
+  nextTargetDate  DateTime?
+  status          String    @default("idle")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([shopDomain])
   @@index([enabled])
@@ -122,10 +122,10 @@ model AutomationSchedule {
 model Subscription {
   id              String    @id @default(cuid())
   shopDomain      String    @unique
-  plan            String    @default("free") // "free", "starter", "pro"
-  shopifyChargeId String?   // Shopify subscription ID
-  status          String    @default("active") // "active", "cancelled", "declined"
-  billingOn       DateTime? // Next billing date
+  plan            String    @default("free")
+  shopifyChargeId String?
+  status          String    @default("active")
+  billingOn       DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -135,13 +135,13 @@ model Subscription {
 }
 
 model UsageTracking {
-  id            String   @id @default(cuid())
-  shopDomain    String
-  weekStart     DateTime // Start of the week (Monday)
-  blogsGenerated Int     @default(0)
-  llmsGenerated Int      @default(0) // Track LLMs.txt generations
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String   @id @default(cuid())
+  shopDomain     String
+  weekStart      DateTime
+  blogsGenerated Int      @default(0)
+  llmsGenerated  Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@unique([shopDomain, weekStart])
   @@index([shopDomain])

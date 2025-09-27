@@ -32,6 +32,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const billingService = new BillingService(prisma, admin);
 
+    // Check URL parameters for development billing flow
+    const url = new URL(request.url);
+    const planParam = url.searchParams.get('plan') as PlanType;
+    const returnUrl = url.searchParams.get('return_url');
+
     // Get current subscription and usage
     const [subscription, usage, allPlans] = await Promise.all([
       billingService.getSubscription(shopDomain),
@@ -44,6 +49,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       subscription,
       usage,
       allPlans,
+      developmentBilling: {
+        selectedPlan: planParam,
+        returnUrl
+      },
       error: null
     });
   } catch (error) {
@@ -86,6 +95,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json(result);
     }
 
+    if (actionType === 'confirmPayment') {
+      // Development mode payment confirmation
+      if (plan !== 'starter' && plan !== 'pro') {
+        return json({ success: false, error: 'Invalid plan selected' });
+      }
+
+      console.log(`[Billing] Confirming payment for ${plan} plan in development mode`);
+
+      // Update subscription to active
+      await prisma.subscription.upsert({
+        where: { shopDomain },
+        update: {
+          plan,
+          status: 'active',
+          billingOn: new Date()
+        },
+        create: {
+          shopDomain,
+          plan,
+          status: 'active',
+          billingOn: new Date()
+        }
+      });
+
+      // Get return URL from form data
+      const returnUrl = formData.get('returnUrl') as string;
+
+      if (returnUrl) {
+        console.log(`[Billing] Redirecting to: ${returnUrl}`);
+        return redirect(returnUrl);
+      }
+
+      return json({ success: true, message: 'Payment confirmed successfully!' });
+    }
+
     if (actionType === 'cancel') {
       const result = await billingService.cancelSubscription(shopDomain);
       return json(result);
@@ -117,7 +161,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 function Billing() {
-  const { shopInfo, subscription, usage, allPlans, error: loaderError } = useLoaderData<typeof loader>();
+  const { shopInfo, subscription, usage, allPlans, developmentBilling, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const [searchParams] = useSearchParams();
 
@@ -175,7 +219,7 @@ function Billing() {
   };
 
   const handleSubscribe = (plan: PlanType) => {
-    fetcher.submit({ actionType: 'subscribe', plan }, { method: 'POST' });
+    fetcher.submit({ plan }, { method: 'POST', action: '/api/subscribe' });
   };
 
   const handleCancel = () => {
@@ -190,6 +234,41 @@ function Billing() {
 
       <Layout>
         <Layout.Section>
+          {/* Development Billing Interface */}
+          {developmentBilling?.selectedPlan && (
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingLg">💳 Development Payment Page</Text>
+                <Text as="p" variant="bodyMd">
+                  You're about to subscribe to the <Badge tone="info">{developmentBilling.selectedPlan.charAt(0).toUpperCase() + developmentBilling.selectedPlan.slice(1)} Plan</Badge>
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  This is a development environment. Click "Confirm Payment" to simulate a successful payment.
+                </Text>
+                <InlineStack gap="200">
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      fetcher.submit({
+                        actionType: 'confirmPayment',
+                        plan: developmentBilling.selectedPlan!,
+                        returnUrl: developmentBilling.returnUrl || '/app/seo-blogs?showWizard=true&step=3&planConfirmed=true'
+                      }, { method: 'POST' });
+                    }}
+                    loading={isLoading}
+                  >
+                    💳 Confirm Payment (Development)
+                  </Button>
+                  <Button
+                    onClick={() => window.history.back()}
+                  >
+                    Cancel
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Card>
+          )}
+
           {showNotification && (
             <Banner
               title="Subscription Confirmed!"
@@ -380,7 +459,7 @@ function Billing() {
                   Billing Information
                 </Text>
                 <Text as="p" variant="bodyMd">
-                  Next billing date: {subscription.billingOn.toLocaleDateString()}
+                  Next billing date: {subscription.billingOn ? new Date(subscription.billingOn).toLocaleDateString() : 'Not set'}
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Status: {subscription.status}

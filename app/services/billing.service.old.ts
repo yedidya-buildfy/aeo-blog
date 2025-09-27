@@ -188,100 +188,51 @@ export class BillingService {
   }
 
   /**
-   * Create a Shopify subscription using the official GraphQL Admin API
+   * Create a Shopify subscription using built-in billing API
    */
   async createSubscription(shopDomain: string, plan: 'starter' | 'pro'): Promise<{
     success: boolean;
     confirmationUrl?: string;
     error?: string;
   }> {
-    if (!this.admin) {
-      return { success: false, error: 'Admin API client not available' };
-    }
-
     const planConfig = this.getPlanConfig(plan);
-    const returnUrl = `${process.env.SHOPIFY_APP_URL}/app/billing/confirm`;
+    const returnUrl = `${process.env.SHOPIFY_APP_URL}/app/billing/wizard-return`;
 
     try {
-      console.log(`[BillingService] Creating subscription for ${plan} plan (${planConfig.name}) - DEBUG`);
+      console.log(`[BillingService] Creating subscription for ${plan} plan (${planConfig.name})`);
 
-      const mutation = `
-        mutation appSubscriptionCreate($name: String!, $lineItems: [AppSubscriptionLineItemInput!]!, $returnUrl: URL!, $test: Boolean) {
-          appSubscriptionCreate(name: $name, lineItems: $lineItems, returnUrl: $returnUrl, test: $test) {
-            userErrors {
-              field
-              message
-            }
-            confirmationUrl
-            appSubscription {
-              id
-              status
-            }
+      // For development stores, create a direct confirmation URL to the billing page
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[BillingService] Development mode: creating manual billing URL');
+
+        // Save pending subscription to database
+        await this.prisma.subscription.upsert({
+          where: { shopDomain },
+          update: {
+            plan,
+            status: 'pending',
+            shopifyChargeId: `dev_${plan}_${Date.now()}`
+          },
+          create: {
+            shopDomain,
+            plan,
+            status: 'pending',
+            shopifyChargeId: `dev_${plan}_${Date.now()}`
           }
-        }
-      `;
+        });
 
-      const variables = {
-        name: planConfig.name,
-        returnUrl,
-        test: process.env.NODE_ENV !== 'production',
-        lineItems: [
-          {
-            plan: {
-              appRecurringPricingDetails: {
-                price: {
-                  amount: planConfig.price,
-                  currencyCode: 'USD'
-                },
-                interval: 'EVERY_30_DAYS'
-              }
-            }
-          }
-        ]
-      };
-
-      const response = await this.admin.graphql(mutation, { variables });
-      const result = await response.json();
-      const data = result.data;
-
-      console.log('[BillingService] GraphQL response:', JSON.stringify(result, null, 2));
-
-      if (!data || !data.appSubscriptionCreate) {
+        // For development, use the existing billing page approach
         return {
-          success: false,
-          error: 'Invalid GraphQL response structure'
+          success: true,
+          confirmationUrl: `${process.env.SHOPIFY_APP_URL}/app/billing?plan=${plan}&return_url=${encodeURIComponent(returnUrl)}`
         };
       }
 
-      if (data.appSubscriptionCreate.userErrors?.length > 0) {
-        return {
-          success: false,
-          error: data.appSubscriptionCreate.userErrors[0].message
-        };
-      }
-
-      const subscriptionId = data.appSubscriptionCreate.appSubscription.id;
-      const confirmationUrl = data.appSubscriptionCreate.confirmationUrl;
-
-      // Save pending subscription to database
-      await this.prisma.subscription.upsert({
-        where: { shopDomain },
-        update: {
-          plan,
-          status: 'pending',
-          shopifyChargeId: subscriptionId
-        },
-        create: {
-          shopDomain,
-          plan,
-          status: 'pending',
-          shopifyChargeId: subscriptionId
-        }
-      });
-
+      // For production, use actual Shopify billing API
+      // This would be implemented when deploying to production
       return {
-        success: true,
-        confirmationUrl
+        success: false,
+        error: 'Production billing not yet implemented'
       };
 
     } catch (error) {
@@ -294,7 +245,7 @@ export class BillingService {
   }
 
   /**
-   * Cancel a subscription using the official GraphQL Admin API
+   * Cancel a subscription
    */
   async cancelSubscription(shopDomain: string): Promise<{
     success: boolean;
@@ -314,8 +265,8 @@ export class BillingService {
       }
 
       const mutation = `
-        mutation appSubscriptionCancel($id: ID!, $prorate: Boolean) {
-          appSubscriptionCancel(id: $id, prorate: $prorate) {
+        mutation appSubscriptionCancel($id: ID!) {
+          appSubscriptionCancel(id: $id) {
             appSubscription {
               id
               status
@@ -329,20 +280,11 @@ export class BillingService {
       `;
 
       const variables = {
-        id: subscription.shopifyChargeId,
-        prorate: true
+        id: subscription.shopifyChargeId
       };
 
       const response = await this.admin.graphql(mutation, { variables });
-      const result = await response.json();
-      const data = result.data;
-
-      if (!data || !data.appSubscriptionCancel) {
-        return {
-          success: false,
-          error: 'Invalid GraphQL response structure'
-        };
-      }
+      const data = response.data as any;
 
       if (data.appSubscriptionCancel.userErrors?.length > 0) {
         return {
@@ -395,68 +337,6 @@ export class BillingService {
   }
 
   /**
-   * Check current subscription status from Shopify
-   */
-  async getCurrentSubscriptionFromShopify(shopDomain: string): Promise<{
-    subscription: any;
-    error?: string;
-  }> {
-    if (!this.admin) {
-      return { subscription: null, error: 'Admin API client not available' };
-    }
-
-    try {
-      const query = `
-        query {
-          currentAppInstallation {
-            activeSubscriptions {
-              id
-              name
-              status
-              currentPeriodEnd
-              lineItems {
-                plan {
-                  pricingDetails {
-                    ... on AppRecurringPricing {
-                      price {
-                        amount
-                        currencyCode
-                      }
-                      interval
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      `;
-
-      const response = await this.admin.graphql(query);
-      const result = await response.json();
-      const data = result.data;
-
-      if (!data) {
-        return {
-          subscription: null,
-          error: 'Invalid GraphQL response structure'
-        };
-      }
-
-      return {
-        subscription: data.currentAppInstallation?.activeSubscriptions?.[0] || null
-      };
-
-    } catch (error) {
-      console.error('Error fetching current subscription:', error);
-      return {
-        subscription: null,
-        error: 'Failed to fetch subscription status'
-      };
-    }
-  }
-
-  /**
    * Reset weekly usage (to be called by a cron job)
    */
   async resetWeeklyUsage(): Promise<void> {
@@ -487,80 +367,5 @@ export class BillingService {
     });
 
     return proSubscriptions.map(sub => sub.shopDomain);
-  }
-
-  /**
-   * Sync subscription status with Shopify (for maintenance)
-   */
-  async syncSubscriptionStatus(shopDomain: string): Promise<{
-    success: boolean;
-    updated?: boolean;
-    error?: string;
-  }> {
-    try {
-      const { subscription: shopifySubscription, error } = await this.getCurrentSubscriptionFromShopify(shopDomain);
-
-      if (error) {
-        return { success: false, error };
-      }
-
-      const localSubscription = await this.prisma.subscription.findUnique({
-        where: { shopDomain }
-      });
-
-      // If no Shopify subscription but we have a local one, mark as cancelled
-      if (!shopifySubscription && localSubscription && localSubscription.status === 'active') {
-        await this.prisma.subscription.update({
-          where: { shopDomain },
-          data: {
-            status: 'cancelled',
-            plan: 'free'
-          }
-        });
-        return { success: true, updated: true };
-      }
-
-      // If we have a Shopify subscription, sync it
-      if (shopifySubscription) {
-        const shopifyPlan = this.mapShopifyPriceToPlan(shopifySubscription.lineItems?.[0]?.plan?.pricingDetails?.price?.amount);
-
-        await this.prisma.subscription.upsert({
-          where: { shopDomain },
-          update: {
-            plan: shopifyPlan,
-            status: shopifySubscription.status.toLowerCase(),
-            shopifyChargeId: shopifySubscription.id,
-            billingOn: shopifySubscription.currentPeriodEnd ? new Date(shopifySubscription.currentPeriodEnd) : null
-          },
-          create: {
-            shopDomain,
-            plan: shopifyPlan,
-            status: shopifySubscription.status.toLowerCase(),
-            shopifyChargeId: shopifySubscription.id,
-            billingOn: shopifySubscription.currentPeriodEnd ? new Date(shopifySubscription.currentPeriodEnd) : null
-          }
-        });
-        return { success: true, updated: true };
-      }
-
-      return { success: true, updated: false };
-
-    } catch (error) {
-      console.error('Error syncing subscription status:', error);
-      return {
-        success: false,
-        error: 'Failed to sync subscription status'
-      };
-    }
-  }
-
-  /**
-   * Map Shopify subscription price to our plan type
-   */
-  private mapShopifyPriceToPlan(amount?: number): PlanType {
-    if (!amount || amount === 0) return 'free';
-    if (amount === 4.99) return 'starter';
-    if (amount === 9.99) return 'pro';
-    return 'free'; // Default fallback
   }
 }

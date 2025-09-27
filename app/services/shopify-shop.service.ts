@@ -49,13 +49,21 @@ export class ShopifyShopService {
   }
 
   async getShopDomain(): Promise<string> {
-    const shopInfo = await this.getShopInfo();
-    return shopInfo.primaryDomain;
+    // DEV NOTE: Original code for production
+    // const shopInfo = await this.getShopInfo();
+    // return shopInfo.primaryDomain;
+
+    // TEMP TEST: Using drive-buddy.com for testing
+    return 'drive-buddy.com';
   }
 
   async getHomepageUrl(): Promise<string> {
-    const domain = await this.getShopDomain();
-    return `https://${domain}`;
+    // DEV NOTE: Original code for production
+    // const domain = await this.getShopDomain();
+    // return `https://${domain}`;
+
+    // TEMP TEST: Using drive-buddy.com for testing
+    return 'https://drive-buddy.com';
   }
 
   async getWizardState(): Promise<{ completed: boolean; step?: number } | null> {
@@ -79,11 +87,13 @@ export class ShopifyShopService {
       }
 
       const metafield = data.data?.shop?.metafield;
+
       if (!metafield?.value) {
         return null;
       }
 
-      return JSON.parse(metafield.value);
+      const parsedState = JSON.parse(metafield.value);
+      return parsedState;
     } catch (error) {
       console.error('Error getting wizard state:', error);
       return null;
