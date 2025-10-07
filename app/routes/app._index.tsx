@@ -86,9 +86,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   } catch (error) {
     console.error('Error in loader:', error);
-    console.log('[DEBUG] Setting showWizardSpotlight to TRUE due to GraphQL error');
 
     // Return default state for authentication issues
+    // Don't force wizard to show - respect the actual wizard state
     return json({
       status: {
         shopDomain: 'Authenticating...',
@@ -105,7 +105,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         timeSavedHours: 0,
         weeksActive: 0
       },
-      showWizardSpotlight: true,
+      showWizardSpotlight: false, // Don't force wizard on errors
       error: 'Authentication failed'
     });
   }
@@ -378,7 +378,10 @@ export default function AEODashboard() {
           } else {
             // If wizard is not active, redirect directly to SEO blogs page with wizard forced
             setTimeout(() => {
-              navigate('/app/seo-blogs?showWizard=true');
+              // Must use window.location for Shopify embedded apps
+              const currentParams = new URLSearchParams(window.location.search);
+              currentParams.set('showWizard', 'true');
+              window.location.href = `/app/seo-blogs?${currentParams.toString()}`;
             }, 2000); // 2 second delay to show the success message
           }
         } else if (actionType === 'restore') {
@@ -523,11 +526,52 @@ export default function AEODashboard() {
     );
   }
 
+  const handleResetAppData = async () => {
+    if (!window.confirm('⚠️ This will delete ALL app data (keywords, blogs, settings). Continue?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/clear-all-data', { method: 'POST' });
+      const result = await response.json();
+
+      if (result.success) {
+        shopify.toast.show('All data cleared! Reloading...');
+        setTimeout(() => {
+          // Must use window.location for Shopify embedded apps
+          const currentParams = new URLSearchParams(window.location.search);
+          window.location.href = `/app?${currentParams.toString()}`;
+        }, 1500);
+      } else {
+        shopify.toast.show(`Error: ${result.error}`, { isError: true });
+      }
+    } catch (error) {
+      shopify.toast.show('Failed to clear data', { isError: true });
+    }
+  };
+
   return (
     <Page>
       <TitleBar title="AEO One-Click" />
 
       <BlockStack gap="500">
+        {/* DEV ONLY: Reset Button - TODO: Remove in production */}
+        {process.env.NODE_ENV !== 'production' && (
+          <Banner tone="warning">
+            <BlockStack gap="200">
+              <Text as="p" variant="bodyMd" fontWeight="bold">
+                🔧 Development Tools (Remove in Production)
+              </Text>
+              <Button
+                variant="plain"
+                tone="critical"
+                onClick={handleResetAppData}
+              >
+                Reset All App Data
+              </Button>
+            </BlockStack>
+          </Banner>
+        )}
         {/* KPI Metrics Cards */}
         <div
           style={{

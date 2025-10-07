@@ -16,7 +16,7 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
 
-  // Check wizard state - TEMP: Force show wizard for debugging
+  // Check wizard state
   const shopService = new ShopifyShopService(admin);
   let wizardState = null;
   try {
@@ -24,7 +24,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } catch (error) {
     console.log('[DEBUG] Failed to get wizard state, will show wizard:', error);
   }
-  const showWizard = true; // TEMP: Always show wizard for debugging
+  const showWizard = !wizardState?.completed;
 
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",

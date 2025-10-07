@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher } from "@remix-run/react";
+import { useLoaderData, useFetcher, useNavigate } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -98,7 +98,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Check if returning from billing
     const billingSuccess = url.searchParams.get('billing') === 'success';
     const plan = url.searchParams.get('plan') as 'starter' | 'pro' | null;
-    const returningFromBilling = billingSuccess && step === 3;
 
     // If returning from billing, verify payment and update database
     if (billingSuccess && plan) {
@@ -146,11 +145,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
     }
 
-    // Show wizard if:
-    // 1. Not completed yet, OR
-    // 2. Force show wizard parameter is true, OR
-    // 3. Returning from billing (need to complete step 3)
-    const showWizardSpotlight = !wizardState?.completed || forceShowWizard || returningFromBilling;
+    // Show wizard if not completed (respects metadata) OR force show requested
+    // Note: forceShowWizard is only used for "Run Setup Wizard Again" button, not during normal flow
+    const showWizardSpotlight = !wizardState?.completed || forceShowWizard;
 
     // Load existing keywords from database
     let existingKeywords = null;
@@ -911,6 +908,7 @@ interface KeywordData {
 function SEOBlogs() {
   const { shopInfo, existingKeywords, recentBlogs, automationSchedule, billing, showWizardSpotlight, wizardStep, planConfirmed, paymentError, currentPlan, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  const navigate = useNavigate();
 
   // Remove toast notifications to fix SSR issues
   const showNotification = (message: string, isError = false) => {
@@ -1412,26 +1410,6 @@ function SEOBlogs() {
                 </Text>
               </BlockStack>
 
-              {/* Run Wizard Again (only show if wizard was previously completed) */}
-              {!showWizardSpotlight && (
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingMd">
-                    Need Help?
-                  </Text>
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      // Temporarily reset wizard state to show it again
-                      window.location.href = window.location.href + '?showWizard=true';
-                    }}
-                  >
-                    Run Setup Wizard Again
-                  </Button>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Re-run the guided setup process if you need help
-                  </Text>
-                </BlockStack>
-              )}
             </BlockStack>
           </Card>
         </Layout.Section>

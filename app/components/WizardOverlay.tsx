@@ -8,7 +8,7 @@ import {
   Badge,
   Spinner,
 } from "@shopify/polaris";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher, useNavigate } from "@remix-run/react";
 
 interface WizardOverlayProps {
   isActive: boolean;
@@ -44,6 +44,7 @@ interface WizardState {
 export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccessTriggered, onNavigateToSEOBlogs, startFromStep = 1, planConfirmed = false, paymentError = false, currentPlan = null }: WizardOverlayProps) {
   const fetcher = useFetcher();
   const planSelectionFetcher = useFetcher();
+  const navigate = useNavigate();
   const [wizardState, setWizardState] = useState<WizardState>({
     currentStep: startFromStep,
     selectedPlan: null,
@@ -72,14 +73,18 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
         currentStep: 2
       }));
 
-      // Navigate to SEO blogs page after AEO completion
+      // Navigate to SEO blogs page with wizard at step 2 after AEO completion
       if (onNavigateToSEOBlogs) {
         setTimeout(() => {
-          onNavigateToSEOBlogs();
+          // Must use window.location for cross-route navigation in Shopify embedded apps
+          const currentParams = new URLSearchParams(window.location.search);
+          currentParams.set('showWizard', 'true');
+          currentParams.set('step', '2');
+          window.location.href = `/app/seo-blogs?${currentParams.toString()}`;
         }, 1500); // Small delay to show success message
       }
     }
-  }, [aeoSuccessTriggered, onNavigateToSEOBlogs]);
+  }, [aeoSuccessTriggered, onNavigateToSEOBlogs, navigate]);
 
   // Handle billing confirmation or error from URL parameters
   useEffect(() => {
@@ -183,8 +188,14 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
                 clearInterval(countdown);
                 // Call onComplete to hide wizard and redirect to clean URL
                 setTimeout(() => {
-                  // Redirect to clean URL without wizard parameters
-                  window.location.href = '/app/seo-blogs';
+                  // Must use window.location for Shopify embedded apps
+                  const currentParams = new URLSearchParams(window.location.search);
+                  currentParams.delete('showWizard');
+                  currentParams.delete('step');
+                  currentParams.delete('planConfirmed');
+                  currentParams.delete('paymentError');
+                  const paramString = currentParams.toString();
+                  window.location.href = `/app/seo-blogs${paramString ? '?' + paramString : ''}`;
                 }, 100);
                 return prev;
               }
@@ -222,6 +233,7 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
       } else if (data.success && data.alreadySubscribed) {
         // Already subscribed, redirect directly to step 3
         console.log('[Wizard] Already subscribed, going to step 3');
+        // Must use window.location for Shopify embedded apps
         window.location.href = data.redirectUrl;
       } else if (data.success === false) {
         // Error in plan selection

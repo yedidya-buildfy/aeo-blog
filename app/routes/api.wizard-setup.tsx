@@ -223,25 +223,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`[WizardSetup] Step 3 complete: Weekly automation enabled`);
 
-    // Step 4: Mark wizard as completed in Shopify metafields
+    // Step 4: Mark wizard as completed in Shopify metafields (CRITICAL - must succeed)
     console.log(`[WizardSetup] Step 4: Marking wizard as completed`);
 
-    try {
-      const wizardCompleted = await shopService.setWizardState({
-        completed: true,
-        step: 3,
-        completedAt: new Date().toISOString()
-      });
+    const wizardCompleted = await shopService.setWizardState({
+      completed: true,
+      step: 3,
+      completedAt: new Date().toISOString()
+    });
 
-      if (wizardCompleted) {
-        console.log(`[WizardSetup] Step 4 complete: Wizard state saved`);
-      } else {
-        console.log(`[WizardSetup] Step 4 warning: Failed to save wizard state`);
-      }
-    } catch (error) {
-      console.error(`[WizardSetup] Step 4 error: Failed to save wizard state:`, error);
-      // Don't fail the whole setup for this
+    if (!wizardCompleted) {
+      console.error(`[WizardSetup] Step 4 FAILED: Could not save wizard state to metadata`);
+      throw new Error('Failed to save wizard completion state. Please try again.');
     }
+
+    console.log(`[WizardSetup] Step 4 complete: Wizard state saved to metadata successfully`);
 
     return json({
       success: true,
