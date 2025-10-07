@@ -1,4 +1,4 @@
-import { AdminApiContext } from "@shopify/shopify-app-remix/server";
+import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 
 export interface ShopInfo {
   id: number;
@@ -9,7 +9,7 @@ export interface ShopInfo {
 }
 
 export class ShopifyShopService {
-  constructor(private admin: AdminApiContext) {}
+  constructor(private admin: AdminApiContext<any>) {}
 
   async getShopInfo(): Promise<ShopInfo> {
     const query = `

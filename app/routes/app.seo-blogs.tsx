@@ -91,9 +91,59 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Check URL parameters for wizard state
     const url = new URL(request.url);
     const forceShowWizard = url.searchParams.get('showWizard') === 'true';
-    const planConfirmed = url.searchParams.get('planConfirmed') === 'true';
+    let planConfirmed = url.searchParams.get('planConfirmed') === 'true';
     const paymentError = url.searchParams.get('paymentError') === 'true';
     const step = url.searchParams.get('step') ? parseInt(url.searchParams.get('step')!) : undefined;
+
+    // Check if returning from billing
+    const billingSuccess = url.searchParams.get('billing') === 'success';
+    const plan = url.searchParams.get('plan') as 'starter' | 'pro' | null;
+
+    // If returning from billing, verify payment and update database
+    if (billingSuccess && plan) {
+      console.log('[SEO-BLOGS] Returning from billing, verifying payment for plan:', plan);
+
+      try {
+        const { billing: shopifyBilling } = await authenticate.admin(request);
+        const planName = plan === 'starter' ? 'Starter Plan' : 'Pro Plan';
+
+        const billingCheck = await shopifyBilling.check({
+          plans: [planName],
+          isTest: process.env.NODE_ENV !== 'production',
+        });
+
+        console.log('[SEO-BLOGS] Billing check result:', {
+          hasActivePayment: billingCheck.hasActivePayment,
+          appSubscriptions: billingCheck.appSubscriptions?.length || 0
+        });
+
+        if (billingCheck.hasActivePayment && billingCheck.appSubscriptions && billingCheck.appSubscriptions.length > 0) {
+          const activeSubscription = billingCheck.appSubscriptions[0];
+
+          await prisma.subscription.upsert({
+            where: { shopDomain: shopInfo.primaryDomain || 'unknown' },
+            update: {
+              plan: plan,
+              status: 'active',
+              billingOn: new Date(),
+              shopifyChargeId: activeSubscription.id
+            },
+            create: {
+              shopDomain: shopInfo.primaryDomain || 'unknown',
+              plan: plan,
+              status: 'active',
+              billingOn: new Date(),
+              shopifyChargeId: activeSubscription.id
+            }
+          });
+
+          console.log(`[SEO-BLOGS] Payment verified and database updated for ${plan} plan`);
+          planConfirmed = true; // Set planConfirmed to trigger wizard step 3
+        }
+      } catch (billingError) {
+        console.error('[SEO-BLOGS] Error verifying billing:', billingError);
+      }
+    }
 
     const showWizardSpotlight = !wizardState?.completed || forceShowWizard;
 
@@ -147,40 +197,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     let billing = null;
     try {
       const billingService = new BillingService(prisma, admin);
-
-      // If planConfirmed is true, verify payment with Shopify and update our database
-      if (planConfirmed) {
-        const { admin: billingAdmin, billing: shopifyBilling } = await authenticate.admin(request);
-        const { hasActivePayment, appSubscriptions } = await shopifyBilling.check();
-
-        if (hasActivePayment && appSubscriptions && appSubscriptions.length > 0) {
-          const activeSubscription = appSubscriptions[0];
-          let plan = 'starter';
-          if (activeSubscription.name?.toLowerCase().includes('pro')) {
-            plan = 'pro';
-          }
-
-          // Update our database with the confirmed subscription
-          await prisma.subscription.upsert({
-            where: { shopDomain: shopInfo.primaryDomain || 'unknown' },
-            update: {
-              plan: plan as 'starter' | 'pro',
-              status: 'active',
-              billingOn: new Date(),
-              shopifyChargeId: activeSubscription.id
-            },
-            create: {
-              shopDomain: shopInfo.primaryDomain || 'unknown',
-              plan: plan as 'starter' | 'pro',
-              status: 'active',
-              billingOn: new Date(),
-              shopifyChargeId: activeSubscription.id
-            }
-          });
-
-          console.log(`[SEO-Blogs] Payment confirmed for ${plan} plan`);
-        }
-      }
 
       const [subscription, usage] = await Promise.all([
         billingService.getSubscription(shopInfo.primaryDomain || 'unknown'),

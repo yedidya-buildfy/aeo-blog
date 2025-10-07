@@ -81,7 +81,8 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
         currentStep: 3,
         planSelected: true,
         isProcessingPayment: false,
-        error: null
+        error: null,
+        aeoCompleted: true // Ensure AEO is marked as completed
       }));
     } else if (paymentError) {
       console.log('[Wizard] Payment error detected, showing error in step 2');
@@ -90,7 +91,8 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
         currentStep: 2,
         planSelected: false,
         isProcessingPayment: false,
-        error: 'Payment was cancelled or failed. Please try selecting a plan again.'
+        error: 'Payment was cancelled or failed. Please try selecting a plan again.',
+        aeoCompleted: true // Keep AEO as completed
       }));
     }
   }, [planConfirmed, paymentError]);
@@ -171,15 +173,24 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
 
   // Watch for plan selection fetcher state changes (for paid plans only)
   useEffect(() => {
+    console.log('[Wizard] Plan fetcher state:', planSelectionFetcher.state);
+
     if (planSelectionFetcher.state === 'idle' && planSelectionFetcher.data) {
       const data = planSelectionFetcher.data as any;
+      console.log('[Wizard] Plan fetcher data:', data);
 
-      if (data.success) {
-        // Simple billing route just redirects automatically via billing.request()
-        // No need to manually redirect - Shopify handles it
-        console.log('[Wizard] Payment processing initiated via Shopify billing');
-      } else {
+      if (data.success && data.confirmationUrl) {
+        // Redirect to Shopify's billing confirmation page using top-level redirect
+        console.log('[Wizard] Redirecting to Shopify billing:', data.confirmationUrl);
+        // Use top-level redirect to break out of iframe
+        window.top!.location.href = data.confirmationUrl;
+      } else if (data.success && data.alreadySubscribed) {
+        // Already subscribed, redirect directly to step 3
+        console.log('[Wizard] Already subscribed, going to step 3');
+        window.location.href = data.redirectUrl;
+      } else if (data.success === false) {
         // Error in plan selection
+        console.error('[Wizard] Plan selection error:', data.error);
         setWizardState(prev => ({
           ...prev,
           error: data.error || 'Failed to select plan. Please try again.',
@@ -187,6 +198,10 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
           currentOperation: ''
         }));
       }
+    }
+
+    if (planSelectionFetcher.state === 'submitting') {
+      console.log('[Wizard] Submitting plan selection...');
     }
   }, [planSelectionFetcher.state, planSelectionFetcher.data]);
 
