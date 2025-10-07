@@ -57,12 +57,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Get AEO status
     const status = await aeoService.getStatus();
 
-    // Calculate KPI metrics - temporarily disable BlogPost queries due to schema issues
-    // DEV NOTE: Original code for production
-    // const shopDomain = shopInfo.primaryDomain || 'unknown';
-
-    // TEMP TEST: Using drive-buddy.com for testing
-    const shopDomain = 'drive-buddy.com';
+    // Calculate KPI metrics
+    const shopDomain = shopInfo.primaryDomain || 'unknown';
 
     // Check wizard state
     const wizardState = await shopService.getWizardState();

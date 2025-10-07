@@ -21,16 +21,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const { admin } = await authenticate.admin(request);
     const shopService = new ShopifyShopService(admin);
 
-    // DEV NOTE: Original code for production
-    // const shopInfo = await shopService.getShopInfo();
-    // const shopDomain = shopInfo.primaryDomain || 'unknown';
-    // const homepageUrl = `https://${shopDomain}/`;
+    // Get the actual shop domain and homepage URL
+    const shopInfo = await shopService.getShopInfo();
+    const shopDomain = shopInfo.primaryDomain;
+    const homepageUrl = `https://${shopDomain}`;
 
-    // TEMP TEST: Using drive-buddy.com for testing
-    const shopDomain = 'drive-buddy.com';
-    const homepageUrl = 'https://drive-buddy.com';
-
-    console.log(`[WizardSetup] Starting complete setup for ${shopDomain} (TEST MODE)`);
+    console.log(`[WizardSetup] Starting complete setup for ${shopDomain}`);
 
     // Step 1: Generate keywords
     console.log(`[WizardSetup] Step 1: Generating keywords`);
@@ -128,16 +124,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const currentPlan = subscription?.plan || 'free';
 
     // Determine number of blogs to generate based on plan
-    let blogsToGenerate = 1; // Default for free plan
+    let totalBlogsToGenerate = 1; // Default for free plan
     if (currentPlan === 'starter') {
-      blogsToGenerate = 1; // Starter gets 1 initial blog
+      totalBlogsToGenerate = 1;
     } else if (currentPlan === 'pro') {
-      blogsToGenerate = 3; // Pro gets 3 initial blogs (instead of 10 to be reasonable)
+      totalBlogsToGenerate = 3; // Pro gets 3 blogs total
     }
 
-    console.log(`[WizardSetup] Plan: ${currentPlan}, blogs to generate: ${blogsToGenerate}, can generate: ${canGenerate}`);
+    console.log(`[WizardSetup] Plan: ${currentPlan}, total blogs: ${totalBlogsToGenerate}, can generate: ${canGenerate}`);
 
-    let generatedBlogs: string[] = [];
+    let firstBlogGenerated = false;
 
     if (!canGenerate) {
       console.log(`[WizardSetup] Blog generation skipped - billing limit reached`);
@@ -146,67 +142,77 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const keywordService = new KeywordAggregationService(prisma);
       const keywordContext = await keywordService.getKeywordContextForGeneration(shopDomain);
 
-      // Generate multiple blogs based on plan
-      for (let i = 0; i < blogsToGenerate; i++) {
-        try {
-          console.log(`[WizardSetup] Generating blog ${i + 1}/${blogsToGenerate}`);
+      // Generate FIRST blog synchronously (needed for wizard completion)
+      try {
+        console.log(`[WizardSetup] Generating first blog (synchronous)`);
 
-          // Generate blog prompt
-          const topicGenerator = new AITopicGeneratorService(prisma);
-          const blogPrompt = await topicGenerator.generateUniqueBlogPrompt(shopDomain, keywordContext, homepageUrl);
+        // Generate blog prompt
+        const topicGenerator = new AITopicGeneratorService(prisma);
+        const blogPrompt = await topicGenerator.generateUniqueBlogPrompt(shopDomain, keywordContext, homepageUrl);
 
-          // Generate blog content
-          const blogGenerator = new BlogGeneratorService();
-          const blogContent = await blogGenerator.generateBlog({
-            prompt: blogPrompt,
-            keywordContext: keywordContext,
-            storeUrl: homepageUrl
-          });
+        // Generate blog content
+        const blogGenerator = new BlogGeneratorService();
+        const blogContent = await blogGenerator.generateBlog({
+          prompt: blogPrompt,
+          keywordContext: keywordContext,
+          storeUrl: homepageUrl
+        });
 
-          // Publish to Shopify
-          const shopifyBlogService = new ShopifyBlogService(admin);
-          const publishedBlog = await shopifyBlogService.createAndPublishBlog({
-            generatedBlog: blogContent,
-            published: true
-          });
+        // Publish to Shopify
+        const shopifyBlogService = new ShopifyBlogService(admin);
+        const publishedBlog = await shopifyBlogService.createAndPublishBlog({
+          generatedBlog: blogContent,
+          published: true
+        });
 
-          // Save to database
-          await prisma.blogPost.create({
-            data: {
-              shopDomain: shopDomain,
-              shopifyBlogId: publishedBlog.blog?.id || 'unknown',
-              shopifyArticleId: publishedBlog.article?.id || 'unknown',
-              keyword: blogPrompt.primaryTopic || blogContent.title || 'Generated Blog',
-              title: blogContent.title,
-              status: 'published',
-              publishedAt: new Date(),
-              contentAngle: blogPrompt.contentAngle || 'General',
-              contentHash: blogPrompt.contentHash || '',
-              handle: blogPrompt.handle || '',
-              keywordsFocused: blogPrompt.keywordsFocused || [],
-              primaryTopic: blogPrompt.primaryTopic || blogContent.title || 'General Topic'
-            }
-          });
-
-          // Increment usage for billing tracking
-          await billingService.incrementBlogUsage(shopDomain);
-
-          generatedBlogs.push(blogContent.title);
-
-          console.log(`[WizardSetup] Generated blog ${i + 1}: "${blogContent.title}"`);
-
-          // Add delay between blogs to avoid rate limits
-          if (i < blogsToGenerate - 1) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+        // Save to database
+        await prisma.blogPost.create({
+          data: {
+            shopDomain: shopDomain,
+            shopifyBlogId: publishedBlog.blog?.id || 'unknown',
+            shopifyArticleId: publishedBlog.article?.id || 'unknown',
+            keyword: blogPrompt.primaryTopic || blogContent.title || 'Generated Blog',
+            title: blogContent.title,
+            status: 'published',
+            publishedAt: new Date(),
+            contentAngle: blogPrompt.contentAngle || 'General',
+            contentHash: blogPrompt.contentHash || '',
+            handle: blogPrompt.handle || '',
+            keywordsFocused: blogPrompt.keywordsFocused || [],
+            primaryTopic: blogPrompt.primaryTopic || blogContent.title || 'General Topic'
           }
+        });
 
-        } catch (blogError) {
-          console.error(`[WizardSetup] Error generating blog ${i + 1}:`, blogError);
-          // Continue with next blog instead of failing entirely
-        }
+        // Increment usage for billing tracking
+        await billingService.incrementBlogUsage(shopDomain);
+
+        firstBlogGenerated = true;
+        console.log(`[WizardSetup] First blog generated: "${blogContent.title}"`);
+
+      } catch (blogError) {
+        console.error(`[WizardSetup] Error generating first blog:`, blogError);
       }
 
-      console.log(`[WizardSetup] Step 2 complete: Created ${generatedBlogs.length} blogs: ${generatedBlogs.join(', ')}`);
+      // Generate remaining blogs in BACKGROUND (non-blocking)
+      const remainingBlogs = totalBlogsToGenerate - 1;
+      if (remainingBlogs > 0 && firstBlogGenerated) {
+        console.log(`[WizardSetup] Starting background generation of ${remainingBlogs} remaining blogs`);
+
+        // Fire and forget - don't await this
+        generateRemainingBlogsInBackground(
+          shopDomain,
+          homepageUrl,
+          remainingBlogs,
+          keywordContext,
+          admin,
+          prisma,
+          billingService
+        ).catch(err => {
+          console.error(`[WizardSetup] Background blog generation error:`, err);
+        });
+      }
+
+      console.log(`[WizardSetup] Step 2 complete: First blog created, ${remainingBlogs} blogs queued for background generation`);
     }
 
     // Step 3: Enable weekly automation
@@ -241,10 +247,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       success: true,
       message: 'Setup completed successfully!',
       keywordCount: allKeywords.length,
-      blogsGenerated: generatedBlogs.length,
+      blogsGenerated: 1, // First blog generated, rest in background
       plan: currentPlan,
       automationEnabled: true,
-      wizardCompleted: true
+      wizardCompleted: true,
+      // Progress flags for UI
+      keywordsFound: true,
+      firstBlogGenerated: firstBlogGenerated,
     });
 
   } catch (error) {
@@ -326,4 +335,76 @@ function extractKeywordsFromLine(line: string): string[] {
   keywords.push(...quotedMatches.map(k => k.replace(/"/g, '').trim()));
 
   return keywords.filter(k => k && k.length > 2 && k.length < 50);
+}
+
+// Background blog generation function (non-blocking)
+async function generateRemainingBlogsInBackground(
+  shopDomain: string,
+  homepageUrl: string,
+  remainingCount: number,
+  keywordContext: any,
+  admin: any,
+  prisma: any,
+  billingService: any
+) {
+  console.log(`[BackgroundGen] Starting generation of ${remainingCount} blogs for ${shopDomain}`);
+
+  for (let i = 0; i < remainingCount; i++) {
+    try {
+      console.log(`[BackgroundGen] Generating blog ${i + 1}/${remainingCount}`);
+
+      // Generate blog prompt
+      const topicGenerator = new AITopicGeneratorService(prisma);
+      const blogPrompt = await topicGenerator.generateUniqueBlogPrompt(shopDomain, keywordContext, homepageUrl);
+
+      // Generate blog content
+      const blogGenerator = new BlogGeneratorService();
+      const blogContent = await blogGenerator.generateBlog({
+        prompt: blogPrompt,
+        keywordContext: keywordContext,
+        storeUrl: homepageUrl
+      });
+
+      // Publish to Shopify
+      const shopifyBlogService = new ShopifyBlogService(admin);
+      const publishedBlog = await shopifyBlogService.createAndPublishBlog({
+        generatedBlog: blogContent,
+        published: true
+      });
+
+      // Save to database
+      await prisma.blogPost.create({
+        data: {
+          shopDomain: shopDomain,
+          shopifyBlogId: publishedBlog.blog?.id || 'unknown',
+          shopifyArticleId: publishedBlog.article?.id || 'unknown',
+          keyword: blogPrompt.primaryTopic || blogContent.title || 'Generated Blog',
+          title: blogContent.title,
+          status: 'published',
+          publishedAt: new Date(),
+          contentAngle: blogPrompt.contentAngle || 'General',
+          contentHash: blogPrompt.contentHash || '',
+          handle: blogPrompt.handle || '',
+          keywordsFocused: blogPrompt.keywordsFocused || [],
+          primaryTopic: blogPrompt.primaryTopic || blogContent.title || 'General Topic'
+        }
+      });
+
+      // Increment usage for billing tracking
+      await billingService.incrementBlogUsage(shopDomain);
+
+      console.log(`[BackgroundGen] Blog ${i + 1}/${remainingCount} generated: "${blogContent.title}"`);
+
+      // Add delay between blogs to avoid rate limits
+      if (i < remainingCount - 1) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+    } catch (blogError) {
+      console.error(`[BackgroundGen] Error generating blog ${i + 1}/${remainingCount}:`, blogError);
+      // Continue with next blog instead of failing entirely
+    }
+  }
+
+  console.log(`[BackgroundGen] Completed generation of ${remainingCount} blogs for ${shopDomain}`);
 }

@@ -68,6 +68,16 @@ export class GeminiService {
       console.log('Generated text length:', generatedText ? generatedText.length : 0);
       console.log('=== END GEMINI DEBUG ===');
 
+      // If the generated text is empty or very short, the URL might be inaccessible
+      // This commonly happens with password-protected demo stores
+      if (!generatedText || generatedText.trim().length < 50) {
+        console.log('⚠️  Gemini returned empty/short content. URL might be inaccessible (password-protected store).');
+        console.log('📋 Using fallback template for demo/development stores');
+
+        // Return a generic fallback template
+        return this.getFallbackTemplate(storeUrl);
+      }
+
       return generatedText.trim();
 
     } catch (error) {
@@ -125,5 +135,49 @@ RULES:
 - Make Q&A practical and helpful
 - Do NOT include keywords section
 - Focus on being informative and accurate`;
+  }
+
+  getFallbackTemplate(storeUrl: string): string {
+    // Extract store name from URL (e.g., test123exempale-cloud3.myshopify.com -> Test123exempale Cloud3)
+    const storeName = storeUrl
+      .replace('https://', '')
+      .replace('http://', '')
+      .replace('.myshopify.com', '')
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+
+    return `${storeName} Online Store
+
+An e-commerce store offering various products and services online.
+
+Language: English
+Market/Currency: United States/USD
+Contact: Available on store website
+
+Core pages:
+Homepage: ${storeUrl}
+Products: ${storeUrl}/collections/all
+About: ${storeUrl}/pages/about
+Contact: ${storeUrl}/pages/contact
+
+Products:
+Browse our full product catalog on the website
+
+Policies:
+Shipping policy: ${storeUrl}/policies/shipping-policy
+Refunds/returns: ${storeUrl}/policies/refund-policy
+Privacy: ${storeUrl}/policies/privacy-policy
+Terms: ${storeUrl}/policies/terms-of-service
+
+Short answers assistants can reuse:
+Q: What products do you sell?
+A: We offer a variety of products available through our online store. Visit our products page to browse the full catalog.
+
+Q: How can I contact customer support?
+A: Contact information is available on our contact page or through our website.
+
+Q: What are your shipping and return policies?
+A: Full shipping and return policy details are available on our policies pages.`;
   }
 }

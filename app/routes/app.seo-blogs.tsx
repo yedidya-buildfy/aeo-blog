@@ -98,6 +98,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Check if returning from billing
     const billingSuccess = url.searchParams.get('billing') === 'success';
     const plan = url.searchParams.get('plan') as 'starter' | 'pro' | null;
+    const returningFromBilling = billingSuccess && step === 3;
 
     // If returning from billing, verify payment and update database
     if (billingSuccess && plan) {
@@ -145,7 +146,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
     }
 
-    const showWizardSpotlight = !wizardState?.completed || forceShowWizard;
+    // Show wizard if:
+    // 1. Not completed yet, OR
+    // 2. Force show wizard parameter is true, OR
+    // 3. Returning from billing (need to complete step 3)
+    const showWizardSpotlight = !wizardState?.completed || forceShowWizard || returningFromBilling;
 
     // Load existing keywords from database
     let existingKeywords = null;
@@ -217,6 +222,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       wizardStep: step,
       planConfirmed,
       paymentError,
+      currentPlan: billing?.subscription?.plan || 'free',
       error: null
     });
   } catch (error) {
@@ -231,6 +237,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       wizardStep: undefined,
       planConfirmed: false,
       paymentError: false,
+      currentPlan: 'free' as const,
       error: 'Failed to load shop information'
     });
   }
@@ -902,7 +909,7 @@ interface KeywordData {
 }
 
 function SEOBlogs() {
-  const { shopInfo, existingKeywords, recentBlogs, automationSchedule, billing, showWizardSpotlight, wizardStep, planConfirmed, paymentError, error: loaderError } = useLoaderData<typeof loader>();
+  const { shopInfo, existingKeywords, recentBlogs, automationSchedule, billing, showWizardSpotlight, wizardStep, planConfirmed, paymentError, currentPlan, error: loaderError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
 
   // Remove toast notifications to fix SSR issues
@@ -1435,16 +1442,17 @@ function SEOBlogs() {
         <WizardOverlay
           isActive={showWizardSpotlight}
           onComplete={() => {
-            // Force a reload to reflect the wizard completion state
+            // Reload to refresh wizard state and hide wizard
             window.location.reload();
           }}
           onSkip={() => {
-            // Skip wizard but don't mark as completed - user can run it again
+            // Just reload the page to hide wizard temporarily
             window.location.reload();
           }}
           startFromStep={wizardStep as (1 | 2 | 3) || 2}
           planConfirmed={planConfirmed}
           paymentError={paymentError}
+          currentPlan={currentPlan as 'free' | 'starter' | 'pro'}
         />
       )}
     </Page>

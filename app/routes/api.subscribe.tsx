@@ -41,7 +41,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const appHandle = 'aeo-blog';
 
     // Build the full Shopify admin URL that will re-embed the app properly
-    const returnUrl = `https://admin.shopify.com/store/${storeHandle}/apps/${appHandle}/app/seo-blogs?plan=${plan}&billing=success&showWizard=true&step=3`;
+    const returnUrl = `https://admin.shopify.com/store/${storeHandle}/apps/${appHandle}/app/seo-blogs?plan=${plan}&billing=success&step=3`;
 
     console.log(`[SUBSCRIBE ROUTE] Return URL: ${returnUrl}`);
 

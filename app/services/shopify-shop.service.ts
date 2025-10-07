@@ -49,21 +49,13 @@ export class ShopifyShopService {
   }
 
   async getShopDomain(): Promise<string> {
-    // DEV NOTE: Original code for production
-    // const shopInfo = await this.getShopInfo();
-    // return shopInfo.primaryDomain;
-
-    // TEMP TEST: Using drive-buddy.com for testing
-    return 'drive-buddy.com';
+    const shopInfo = await this.getShopInfo();
+    return shopInfo.primaryDomain;
   }
 
   async getHomepageUrl(): Promise<string> {
-    // DEV NOTE: Original code for production
-    // const domain = await this.getShopDomain();
-    // return `https://${domain}`;
-
-    // TEMP TEST: Using drive-buddy.com for testing
-    return 'https://drive-buddy.com';
+    const domain = await this.getShopDomain();
+    return `https://${domain}`;
   }
 
   async getWizardState(): Promise<{ completed: boolean; step?: number } | null> {

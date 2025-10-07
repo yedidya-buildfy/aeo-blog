@@ -19,6 +19,7 @@ interface WizardOverlayProps {
   startFromStep?: 1 | 2 | 3;
   planConfirmed?: boolean;
   paymentError?: boolean;
+  currentPlan?: 'free' | 'starter' | 'pro' | null;
 }
 
 interface WizardState {
@@ -34,9 +35,13 @@ interface WizardState {
   error: string | null;
   showSuccess: boolean;
   autoCloseTimer: number;
+  // Progress tracking for step 3
+  keywordsFound: boolean;
+  firstBlogGenerated: boolean;
+  automationEnabled: boolean;
 }
 
-export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccessTriggered, onNavigateToSEOBlogs, startFromStep = 1, planConfirmed = false, paymentError = false }: WizardOverlayProps) {
+export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccessTriggered, onNavigateToSEOBlogs, startFromStep = 1, planConfirmed = false, paymentError = false, currentPlan = null }: WizardOverlayProps) {
   const fetcher = useFetcher();
   const planSelectionFetcher = useFetcher();
   const [wizardState, setWizardState] = useState<WizardState>({
@@ -52,6 +57,10 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
     error: null,
     showSuccess: false,
     autoCloseTimer: 0,
+    // Progress tracking for step 3
+    keywordsFound: false,
+    firstBlogGenerated: false,
+    automationEnabled: false,
   });
 
   // Listen for AEO success from parent
@@ -129,43 +138,69 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
     }
   };
 
-  // Watch for fetcher state changes
+  // Watch for fetcher state changes and update progress based on actual API response
   useEffect(() => {
     if (fetcher.state === 'submitting') {
+      // API is working, keep showing loading state
       setWizardState(prev => ({
         ...prev,
-        isBlogGenerating: true,
         error: null,
-        currentOperation: 'Setting up your blog system...'
+        currentOperation: 'Finding best keywords...',
       }));
     } else if (fetcher.state === 'idle' && fetcher.data) {
-      if ((fetcher.data as any)?.success) {
+      const responseData = fetcher.data as any;
+
+      if (responseData?.success) {
+        // Update progress indicators based on actual API response
+        const keywordsFound = responseData.keywordsFound === true || (responseData.keywordCount && responseData.keywordCount > 0);
+        const firstBlogGenerated = responseData.firstBlogGenerated === true || (responseData.blogsGenerated && responseData.blogsGenerated > 0);
+        const automationEnabled = responseData.automationEnabled === true;
+
+        // Set all progress indicators
         setWizardState(prev => ({
           ...prev,
-          isBlogGenerating: false,
-          blogsCompleted: true,
-          showSuccess: true,
-          autoCloseTimer: 5,
-          currentOperation: '🎉 Setup Complete! Your AEO improvements are now active.'
+          keywordsFound,
+          firstBlogGenerated,
+          automationEnabled,
+          currentOperation: 'All steps completed! 🎉',
         }));
 
-        // Start countdown timer for auto-close
-        const countdown = setInterval(() => {
-          setWizardState(prev => {
-            if (prev.autoCloseTimer <= 1) {
-              clearInterval(countdown);
-              setTimeout(() => onComplete(), 100);
-              return prev;
-            }
-            return { ...prev, autoCloseTimer: prev.autoCloseTimer - 1 };
-          });
-        }, 1000);
+        // Wait 2 seconds after all steps complete, then show success screen
+        setTimeout(() => {
+          setWizardState(prev => ({
+            ...prev,
+            isBlogGenerating: false,
+            blogsCompleted: true,
+            showSuccess: true,
+            autoCloseTimer: 5,
+            currentOperation: '🎉 Setup Complete! Your AEO improvements are now active.'
+          }));
+
+          // Start countdown timer for auto-close
+          const countdown = setInterval(() => {
+            setWizardState(prev => {
+              if (prev.autoCloseTimer <= 1) {
+                clearInterval(countdown);
+                // Call onComplete to hide wizard and redirect to clean URL
+                setTimeout(() => {
+                  // Redirect to clean URL without wizard parameters
+                  window.location.href = '/app/seo-blogs';
+                }, 100);
+                return prev;
+              }
+              return { ...prev, autoCloseTimer: prev.autoCloseTimer - 1 };
+            });
+          }, 1000);
+        }, 2000); // 2 second delay after all steps complete
       } else {
         setWizardState(prev => ({
           ...prev,
           isBlogGenerating: false,
-          error: (fetcher.data as any)?.error || 'Setup failed. Please try again.',
-          currentOperation: ''
+          error: responseData?.error || 'Setup failed. Please try again.',
+          currentOperation: '',
+          keywordsFound: false,
+          firstBlogGenerated: false,
+          automationEnabled: false,
         }));
       }
     }
@@ -205,7 +240,17 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
     }
   }, [planSelectionFetcher.state, planSelectionFetcher.data]);
 
-  const handleStartBlogGeneration = () => {
+  const handleStartBlogGeneration = async () => {
+    // Start the generation process
+    setWizardState(prev => ({
+      ...prev,
+      isBlogGenerating: true,
+      currentOperation: 'Finding best keywords...',
+      keywordsFound: false,
+      firstBlogGenerated: false,
+      automationEnabled: false,
+    }));
+
     // Use fetcher to call our server action with proper authentication
     fetcher.submit({}, {
       method: 'POST',
@@ -349,16 +394,80 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
     );
   };
 
-  const renderStep3 = () => (
+  const renderStep3 = () => {
+    // Determine the actual plan (from DB or selected in wizard)
+    const displayPlan = currentPlan || wizardState.selectedPlan || 'free';
+    const isPaidPlan = displayPlan === 'starter' || displayPlan === 'pro';
+
+    return (
     <BlockStack gap="400">
       <Text as="h2" variant="headingLg">📝 Ready to Generate SEO Blogs?</Text>
       <Text as="p" variant="bodyMd">
         We'll discover the best keywords for your website and create optimized blog content to boost your search rankings.
       </Text>
 
-      {wizardState.selectedPlan && (
-        <Badge tone="info">{`Selected: ${wizardState.selectedPlan.charAt(0).toUpperCase() + wizardState.selectedPlan.slice(1)} Plan`}</Badge>
-      )}
+      {/* Current Plan Badge */}
+      <Badge tone={isPaidPlan ? "success" : "info"}>
+        {`Current Plan: ${displayPlan.charAt(0).toUpperCase() + displayPlan.slice(1)}`}
+      </Badge>
+
+      {/* Plan Comparison Table */}
+      <div style={{
+        border: '1px solid #e1e1e1',
+        borderRadius: '8px',
+        padding: '1rem',
+        fontSize: '14px',
+        overflow: 'hidden'
+      }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #e1e1e1', width: '40%' }}>Feature</th>
+              <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #e1e1e1', width: '20%' }}>Free</th>
+              <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #e1e1e1', width: '20%' }}>Starter</th>
+              <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #e1e1e1', width: '20%' }}>Pro</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{ backgroundColor: displayPlan === 'free' ? '#f0f0f0' : 'transparent' }}>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>LLM Optimization</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>✅</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>✅</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>✅</td>
+            </tr>
+            <tr style={{ backgroundColor: displayPlan === 'starter' || displayPlan === 'pro' ? '#f0f0f0' : 'transparent' }}>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>All LLM Optimization</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>✗</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{isPaidPlan && displayPlan === 'starter' ? '✅' : '⏳'}</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{isPaidPlan && displayPlan === 'pro' ? '✅' : '⏳'}</td>
+            </tr>
+            <tr>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>Finding Best Keywords</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{displayPlan === 'free' && wizardState.keywordsFound ? '✅' : '⏳'}</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{displayPlan === 'starter' && wizardState.keywordsFound ? '✅' : '⏳'}</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{displayPlan === 'pro' && wizardState.keywordsFound ? '✅' : '⏳'}</td>
+            </tr>
+            <tr>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>Initial Blog Generation</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{displayPlan === 'free' && wizardState.firstBlogGenerated ? '✅' : '⏳'}</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{displayPlan === 'starter' && wizardState.firstBlogGenerated ? '✅' : '⏳'}</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{displayPlan === 'pro' && wizardState.firstBlogGenerated ? '✅' : '⏳'}</td>
+            </tr>
+            <tr>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>Auto Blog Generation</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{displayPlan === 'free' && wizardState.automationEnabled ? '✅1/week' : '1/week'}</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{displayPlan === 'starter' && wizardState.automationEnabled ? '✅2/week' : '2/week'}</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>{displayPlan === 'pro' && wizardState.automationEnabled ? '✅5/week' : '5/week'}</td>
+            </tr>
+            <tr style={{ backgroundColor: displayPlan === 'free' ? '#f0f0f0' : displayPlan === 'starter' ? '#f0f0f0' : displayPlan === 'pro' ? '#f0f0f0' : 'transparent' }}>
+              <td style={{ padding: '8px 12px' }}>Price</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px' }}>FREE</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px' }}>$4.99/mo</td>
+              <td style={{ textAlign: 'center', padding: '8px 12px' }}>$9.99/mo</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       {wizardState.error ? (
         <BlockStack gap="300" align="center">
@@ -434,7 +543,8 @@ export default function WizardOverlay({ isActive, onComplete, onSkip, aeoSuccess
         </Button>
       )}
     </BlockStack>
-  );
+    );
+  };
 
   const renderProgressSteps = () => (
     <InlineStack gap="200" align="center">
